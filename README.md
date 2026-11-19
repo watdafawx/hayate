@@ -36,7 +36,7 @@ It is an actively developed project. Download the latest build from the [release
 <table>
   <tr>
     <td width="50%"><a href="docs/screenshots/processes.png"><img src="docs/screenshots/processes.png" alt="Processes tab: Apps and Background groups with CPU, memory, disk and GPU columns"></a><br><sub><b>Processes</b>: grouped, expandable, per-process CPU, memory, disk and GPU.</sub></td>
-    <td width="50%"><a href="docs/screenshots/history.png"><img src="docs/screenshots/history.png" alt="History tab: summary strip and per-series charts"></a><br><sub><b>History</b>: last hour per second, summary strip, leak suspects. (Freshly launched here, so the charts are short.)</sub></td>
+    <td width="50%"><a href="docs/screenshots/history.png"><img src="docs/screenshots/history.png" alt="History tab: summary strip and per-series charts"></a><br><sub><b>History</b>: last hour per second, summary strip, leak suspects.</sub></td>
   </tr>
   <tr>
     <td width="50%"><a href="docs/screenshots/services.png"><img src="docs/screenshots/services.png" alt="Services tab: automatic-not-running section, then running services with start type and publisher"></a><br><sub><b>Services</b>: state, PID, start type, publisher; "automatic but not running" first.</sub></td>
