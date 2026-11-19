@@ -1,10 +1,10 @@
-//! Blink's identity for Windows notifications, how Watch alerts reach the
+//! Hayate's identity for Windows notifications, how Watch alerts reach the
 //! user, and whether Windows will show them right now.
 //!
-//! Blink sets an explicit AppUserModelID; the installer (Settings > Install, or
+//! Hayate sets an explicit AppUserModelID; the installer (Settings > Install, or
 //! install.ps1) stamps the same ID on its Start-menu shortcut, so toasts, the
 //! Settings > Notifications entry and the taskbar button all resolve to
-//! "Blink" with Blink's icon.
+//! "Hayate" with Hayate's icon.
 //!
 //! Alerts are real Windows toasts (WinRT ToastNotificationManager) when that
 //! shortcut exists: they stay in the notification centre until dismissed, even
@@ -15,9 +15,9 @@
 //! Clicks on the pop-up arrive in-process (the toast's Activated event) and
 //! open Watch on the event. Clicks on a toast already in the notification
 //! centre go to the COM activator the installer registers (one CLSID under
-//! HKCU\Software\Classes, named by ToastActivatorCLSID on Blink.lnk): Windows
-//! starts `blink.exe -ToastActivated`, which hands the event to the running
-//! Blink or starts Blink on Watch (see `crate::setup`). A portable Blink has
+//! HKCU\Software\Classes, named by ToastActivatorCLSID on Hayate.lnk): Windows
+//! starts `hayate.exe -ToastActivated`, which hands the event to the running
+//! Hayate or starts Hayate on Watch (see `crate::setup`). A portable Hayate has
 //! no activator, so there such clicks only dismiss.
 
 use std::sync::mpsc::Sender;
@@ -26,17 +26,17 @@ use windows::core::{Interface, HSTRING, PCWSTR};
 use windows::Win32::System::Registry::*;
 
 /// Keep in sync with install.ps1 (`$appId`).
-pub const AUMID: &str = "Blink.TaskManager";
+pub const AUMID: &str = "Hayate.TaskManager";
 
-/// Debug builds only: `BLINK_TEST_AUMID=Blink.TaskManager.Test<something>` gives
-/// this process a disposable app identity, so a test of the taskbar Jump
-/// List never touches the real "Blink.TaskManager" list or the user's pins.
+/// Debug builds only: `HAYATE_TEST_AUMID=Hayate.TaskManager.Test<something>` gives
+/// this process a disposable app identity, so a rig test of the taskbar Jump
+/// List never touches the real "Hayate.TaskManager" list or the user's pins.
 /// Release builds ignore it.
 pub fn test_aumid() -> Option<String> {
     #[cfg(debug_assertions)]
     {
-        let v = std::env::var("BLINK_TEST_AUMID").ok()?;
-        let ok = v.len() > "Blink.TaskManager.Test".len() && v.len() <= 100 && v.starts_with("Blink.TaskManager.Test") && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
+        let v = crate::osutil::env_var("TEST_AUMID").ok()?;
+        let ok = v.len() > "Hayate.TaskManager.Test".len() && v.len() <= 100 && v.starts_with("Hayate.TaskManager.Test") && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
         return ok.then_some(v);
     }
     #[cfg(not(debug_assertions))]
@@ -83,7 +83,7 @@ pub fn on_click(f: impl Fn(u64) + Send + Sync + 'static) {
     let _ = CLICK.set(Box::new(f));
 }
 
-/// Real toasts work here: Blink's AUMID belongs to a Start-menu shortcut.
+/// Real toasts work here: Hayate's AUMID belongs to a Start-menu shortcut.
 /// The first call asks the shell (tens of ms): never on the UI thread.
 pub fn toasts_available() -> bool {
     toaster().is_some()
@@ -128,7 +128,7 @@ fn start(first: bool) -> Option<Sender<Note>> {
         if notifier.is_some() {
             crate::osutil::log("toasts: Windows toasts (Start-menu shortcut found)");
         } else if first {
-            crate::osutil::log("toasts: tray balloons (no Start-menu shortcut with Blink's app ID; asked again every 15 s)");
+            crate::osutil::log("toasts: tray balloons (no Start-menu shortcut with Hayate's app ID; asked again every 15 s)");
         }
         let _ = ready_tx.send(notifier.is_some());
         let Some(notifier) = notifier else { return };
@@ -189,7 +189,7 @@ fn show(notifier: &windows::UI::Notifications::ToastNotifier, n: &Note, logo: Op
     Ok(t)
 }
 
-/// ToastGeneric: title, text, Blink's logo; `launch` names the event.
+/// ToastGeneric: title, text, Hayate's logo; `launch` names the event.
 fn toast_xml(n: &Note, logo: Option<&str>) -> String {
     let launch = match n.event_id {
         Some(id) => format!("watch:{id}"),
@@ -221,9 +221,9 @@ fn esc(s: &str) -> String {
     o
 }
 
-/// Toast images must be files: writes the 256 px PNG of Blink's own icon
+/// Toast images must be files: writes the 256 px PNG of Hayate's own icon
 /// (the exe's icon resource, no second copy in the binary) once to
-/// %LOCALAPPDATA%\Blink\toast-logo.png and returns its file URI.
+/// %LOCALAPPDATA%\Hayate\toast-logo.png and returns its file URI.
 fn logo_uri() -> Option<String> {
     let png = icon_png()?;
     let p = crate::osutil::data_dir().join("toast-logo.png");
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn missing_values_read_as_none() {
-        assert_eq!(reg_dword(r"Software\Blink\definitely-not-here", "x"), None);
+        assert_eq!(reg_dword(r"Software\Hayate\definitely-not-here", "x"), None);
     }
 
     #[test]

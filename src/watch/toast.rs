@@ -227,7 +227,7 @@ impl Toaster {
     pub fn new() -> Toaster {
         let s = Arc::new((Mutex::new(Shared { th: Throttle::default(), sink: None, quit: false }), Condvar::new()));
         let s2 = s.clone();
-        let _ = std::thread::Builder::new().name("blink-toast".into()).stack_size(64 * 1024).spawn(move || {
+        let _ = std::thread::Builder::new().name("hayate-toast".into()).stack_size(64 * 1024).spawn(move || {
             let (m, cv) = &*s2;
             let mut g = m.lock().unwrap();
             loop {

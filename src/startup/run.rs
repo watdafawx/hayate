@@ -3,14 +3,14 @@
 //!
 //! The list runs at logon ONLY when every one of these holds (see [`decide`]):
 //!   * the user turned the startup manager on (default off) AND pressed Save,
-//!     which added the private flag [`LOGON_FLAG`] to Blink's own Start with
+//!     which added the private flag [`LOGON_FLAG`] to Hayate's own Start with
 //!     Windows shortcut (`own.rs`, with a rollback if that fails);
 //!   * this process was started with `--resident --startup-logon`, and that
 //!     shortcut exists, is enabled in Windows (StartupApproved) and carries the
 //!     flag. A manual `--resident`, an update, an elevation restart, a taskbar
 //!     task or a hand-typed command lacks the flag; an update or restart strips
 //!     it (`update::logic::PRIVATE_FLAGS`);
-//!   * Blink is provably not elevated (an unreadable token counts as elevated);
+//!   * Hayate is provably not elevated (an unreadable token counts as elevated);
 //!   * Windows says this logon happened in the last 10 minutes;
 //!   * the list is valid and has something to run;
 //!   * this logon has not already run it: a claim file keyed by the logon's
@@ -19,8 +19,8 @@
 //! The flag is not a secret (any process of the user can type it); the claim
 //! limits a typed flag to once per logon and the rules above still apply.
 //! Entries marked Admin never start from the logon run: they are reported as
-//! needing "Run now". Opening the Startup tab, restarting Blink, restarting as
-//! admin and updating Blink never start anything.
+//! needing "Run now". Opening the Startup tab, restarting Hayate, restarting as
+//! admin and updating Hayate never start anything.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -40,7 +40,7 @@ const MAX_LOG: usize = 300;
 
 // ---- when may it start by itself ---------------------------------------------------
 
-/// The private argument Blink's OWN Start with Windows shortcut carries once the
+/// The private argument Hayate's OWN Start with Windows shortcut carries once the
 /// user turned the startup manager on and pressed Save (see [`super::own`]).
 /// It is not a secret (any process of the user can type it): it only stops
 /// ordinary starts (manual `--resident`, updates, restarts) from running the
@@ -53,7 +53,7 @@ pub struct LogonCtx {
     pub manage: bool,
     /// the process arguments are `--resident --startup-logon` (either order)
     pub autostart_args: bool,
-    /// Blink's own Startup shortcut exists, is enabled in Windows and carries the flag
+    /// Hayate's own Startup shortcut exists, is enabled in Windows and carries the flag
     pub autorun_ok: bool,
     /// None = the token could not be read: fail closed
     pub elevated: Option<bool>,
@@ -97,8 +97,8 @@ pub fn decide(c: &LogonCtx) -> Decision {
     Decision::Run
 }
 
-/// `blink.exe --resident --startup-logon` (either order, nothing else needed):
-/// what Blink's own shortcut starts once the startup manager is saved on.
+/// `hayate.exe --resident --startup-logon` (either order, nothing else needed):
+/// what Hayate's own shortcut starts once the startup manager is saved on.
 pub fn is_autostart_args(args: &[String]) -> bool {
     let rest = args.get(1..).unwrap_or(&[]);
     rest.iter().any(|a| a == "--resident") && rest.iter().any(|a| a == LOGON_FLAG)
@@ -263,9 +263,11 @@ thread_local! {
     pub static CLAIM_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-const CLAIM_HEAD: &str = "blink-startup-claim 2";
+const CLAIM_HEAD: &str = "hayate-startup-claim 2";
+/// Written by 0.1.0: still read, so a claim left by the old build is not taken twice.
+const LEGACY_CLAIM_HEAD: &str = "blink-startup-claim 2";
 
-/// Take this logon's one run. `create_new` is atomic: of any number of Blink
+/// Take this logon's one run. `create_new` is atomic: of any number of Hayate
 /// processes racing for the same logon, exactly one gets `Won`; `Won` is only
 /// returned after the claim's content was written and flushed (a claim that
 /// could not be recorded is removed again and reported as `Failed`, never as a
@@ -330,7 +332,8 @@ pub fn claim_with(dir: &Path, id: &Ident, probe: &dyn Fn(u32) -> SessionState) -
 /// (session, logon time) of a claim file written by [`claim_with`].
 fn parse_claim(t: &str) -> Option<(u32, i64)> {
     let mut l = t.lines();
-    if l.next()? != CLAIM_HEAD {
+    let head = l.next()?;
+    if head != CLAIM_HEAD && head != LEGACY_CLAIM_HEAD {
         return None;
     }
     let (mut s, mut lg) = (None, None);
@@ -346,7 +349,7 @@ fn parse_claim(t: &str) -> Option<(u32, i64)> {
 
 // ---- the machine as the scheduler sees it -------------------------------------------
 
-/// CPU from the sampler Blink already runs (a reading is used once: only a new
+/// CPU from the sampler Hayate already runs (a reading is used once: only a new
 /// one counts toward the idle gate); "running" from a process snapshot in this
 /// session.
 pub struct LiveEnv {
@@ -738,7 +741,7 @@ pub fn manager() -> Option<&'static Manager> {
     MANAGER.get()
 }
 
-/// Give every Windows startup entry Blink switched off back, for an uninstall
+/// Give every Windows startup entry Hayate switched off back, for an uninstall
 /// (see `adopt::release_all`). Uses the running manager's list when there is
 /// one, otherwise reads `startup.ini` itself (headless `--startup-release`).
 /// `Err` = something could not be given back: the caller removes NOTHING.
@@ -888,11 +891,11 @@ mod tests {
     #[test]
     fn a_manual_resident_start_inside_the_logon_window_does_not_run() {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        let manual = LogonCtx { autostart_args: is_autostart_args(&s(&["blink.exe", "--resident"])), ..ctx() };
+        let manual = LogonCtx { autostart_args: is_autostart_args(&s(&["hayate.exe", "--resident"])), ..ctx() };
         assert!(!manual.autostart_args);
         assert_eq!(decide(&manual), Decision::Skip("Hayate was not started by its Start with Windows shortcut for the startup manager (update, restart or manual start)"));
         // the flag typed by hand on a machine whose own autorun was never saved for the manager (or is disabled): still no
-        let typed = LogonCtx { autostart_args: is_autostart_args(&s(&["blink.exe", "--resident", LOGON_FLAG])), autorun_ok: false, ..ctx() };
+        let typed = LogonCtx { autostart_args: is_autostart_args(&s(&["hayate.exe", "--resident", LOGON_FLAG])), autorun_ok: false, ..ctx() };
         assert!(matches!(decide(&typed), Decision::Skip(w) if w.contains("shortcut")), "{:?}", decide(&typed));
     }
 
@@ -905,15 +908,15 @@ mod tests {
     #[test]
     fn only_the_flagged_autostart_command_line_qualifies() {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        assert!(is_autostart_args(&s(&[r"C:\b\blink.exe", "--resident", "--startup-logon"])));
-        assert!(is_autostart_args(&s(&["blink.exe", "--startup-logon", "--resident"])), "either order");
+        assert!(is_autostart_args(&s(&[r"C:\b\hayate.exe", "--resident", "--startup-logon"])));
+        assert!(is_autostart_args(&s(&["hayate.exe", "--startup-logon", "--resident"])), "either order");
         // plain autostart without the flag, update relaunch, elevation restart, taskbar task, manual starts
-        assert!(!is_autostart_args(&s(&["blink.exe", "--resident"])));
-        assert!(!is_autostart_args(&s(&["blink.exe", "--startup-logon"])), "the flag alone is not an autostart");
-        assert!(!is_autostart_args(&s(&["blink.exe", "--resident", "--update-show", "front"])));
-        assert!(!is_autostart_args(&s(&["blink.exe", "--wait-pid", "12", "--replace-for-admin"])));
-        assert!(!is_autostart_args(&s(&["blink.exe", "--open"])));
-        assert!(!is_autostart_args(&s(&["blink.exe"])));
+        assert!(!is_autostart_args(&s(&["hayate.exe", "--resident"])));
+        assert!(!is_autostart_args(&s(&["hayate.exe", "--startup-logon"])), "the flag alone is not an autostart");
+        assert!(!is_autostart_args(&s(&["hayate.exe", "--resident", "--update-show", "front"])));
+        assert!(!is_autostart_args(&s(&["hayate.exe", "--wait-pid", "12", "--replace-for-admin"])));
+        assert!(!is_autostart_args(&s(&["hayate.exe", "--open"])));
+        assert!(!is_autostart_args(&s(&["hayate.exe"])));
         assert!(!is_autostart_args(&s(&[])));
     }
 
@@ -922,7 +925,7 @@ mod tests {
     }
 
     fn claim_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("BlinkStartupFixture-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("HayateStartupFixture-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
     }
@@ -1016,7 +1019,7 @@ mod tests {
 
     #[test]
     fn a_claim_that_cannot_be_recorded_does_not_run() {
-        let f = std::env::temp_dir().join(format!("BlinkStartupFixture-claimfile-{}", std::process::id()));
+        let f = std::env::temp_dir().join(format!("HayateStartupFixture-claimfile-{}", std::process::id()));
         std::fs::write(&f, b"not a folder").unwrap();
         assert!(matches!(claim(&f, &ident(1, 1)), Claim::Failed(_)));
         let _ = std::fs::remove_file(&f);

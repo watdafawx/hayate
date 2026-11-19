@@ -1,7 +1,7 @@
 //! Changing startup entries: enable/disable an ordinary entry, and take an
 //! entry over ("manage") or give it back ("unmanage").
 //!
-//! The only thing Blink ever changes about an existing entry is its
+//! The only thing Hayate ever changes about an existing entry is its
 //! StartupApproved value (the same switch Task Manager flips). It never deletes
 //! or rewrites a Run value or a shortcut file.
 //!
@@ -10,18 +10,18 @@
 //!      the shortcut file's bytes) and refuse if either is not what the list
 //!      showed (an installer may have replaced the program);
 //!   2. refuse early (no prompt, no ACL change) if this process cannot write it;
-//!   3. save the ownership record (original bytes + the bytes Blink will write)
+//!   3. save the ownership record (original bytes + the bytes Hayate will write)
 //!      durably (temp write, flush, write-through replace, read back);
 //!   4. re-read the source once more, and only then disable the original;
 //!   5. read back (state and source again), and mark the record Owned.
 //! A failure in 4 or 5 puts the registry back (only while it still holds exactly
-//! what Blink wrote) and removes the half-created managed entry, so a failed
+//! what Hayate wrote) and removes the half-created managed entry, so a failed
 //! take-over never leaves an enabled managed app next to an enabled original. A
 //! crash between 3 and 5 leaves a Pending record that [`reconcile`] resolves from
 //! what the registry says, without writing the registry.
 //!
 //! Giving back restores EXACTLY the recorded original, and only while the live
-//! value is still exactly what Blink wrote. Anything else means somebody (the
+//! value is still exactly what Hayate wrote. Anything else means somebody (the
 //! user in Task Manager, an installer) changed it since: it is left alone.
 //! [`release_all`] does that for every owned entry; the uninstaller calls it
 //! first and removes nothing if it fails.
@@ -103,7 +103,7 @@ pub fn preview(loc: &Locations, e: &Entry, store: &Store) -> Plan {
     let mut lines = Vec::new();
     let id = &e.id;
     let blocked = (|| -> Option<String> {
-        if e.is_blink {
+        if e.is_hayate {
             return Some("This entry starts Hayate itself. Use the Start with Windows switch instead.".into());
         }
         if store.snapshot().cfg.owner_of(id).is_some() {
@@ -305,7 +305,7 @@ fn reconcile_inner(loc: &Locations, store: &Store) -> Vec<String> {
             }
         });
         if saved.is_ok() {
-            // the live value is the original, never Blink's bytes: the copy can give nothing back
+            // the live value is the original, never Hayate's bytes: the copy can give nothing back
             for o in &dropped_machine {
                 super::proof::forget_proven(loc, &o.source, &o.written, o.original.as_deref());
             }
@@ -325,7 +325,7 @@ pub fn reconcile(loc: &Locations, store: &Store) -> Vec<String> {
 pub enum Released {
     /// the exact original was put back
     Restored,
-    /// the live value was no longer what Blink wrote: nothing was touched
+    /// the live value was no longer what Hayate wrote: nothing was touched
     ChangedSince(String),
 }
 
@@ -405,7 +405,7 @@ fn release_outcome(loc: &Locations, store: &Store, app_id: &str) -> Result<Outco
         // real one's copy); best effort, a stale copy alone proves nothing
         super::proof::forget(loc, &o.source);
     } else if machine {
-        // changed outside Blink: the record is gone and the live value is no longer Blink's bytes;
+        // changed outside Hayate: the record is gone and the live value is no longer Hayate's bytes;
         // its copy goes too, but only when it proves exactly this record (elevated, best effort)
         super::proof::forget_proven(loc, &o.source, &o.written, o.original.as_deref());
     }
@@ -439,9 +439,9 @@ pub fn remove(loc: &Locations, store: &Store, app_id: &str) -> Result<Option<Rel
 #[derive(Debug, PartialEq, Default)]
 pub struct ReleasedAll {
     pub restored: usize,
-    /// owned entries that were not Blink's to put back any more (changed outside Blink)
+    /// owned entries that were not Hayate's to put back any more (changed outside Hayate)
     pub left: Vec<String>,
-    /// all-users records Blink could not prove it made (no matching
+    /// all-users records Hayate could not prove it made (no matching
     /// administrator-protected copy): nothing written, not a failure
     pub skipped: Vec<String>,
 }
@@ -458,13 +458,13 @@ impl ReleasedAll {
     }
 }
 
-/// Give back EVERY entry Blink holds, for the uninstaller. Unfinished
+/// Give back EVERY entry Hayate holds, for the uninstaller. Unfinished
 /// take-overs are reconciled first. All or nothing as far as the caller is
 /// concerned: any failure (no administrator rights for an all-users entry, a
-/// registry or list write error, a list Blink cannot read or that lost
+/// registry or list write error, a list Hayate cannot read or that lost
 /// ownership records) returns `Err` naming it, and the uninstaller then removes
 /// NOTHING. An entry somebody else changed since is not touched and is reported
-/// in `left`; it is not a failure (there is nothing of Blink's to restore). An
+/// in `left`; it is not a failure (there is nothing of Hayate's to restore). An
 /// all-users record without its administrator-protected copy (see `proof`) is
 /// never acted on, whatever this process's rights: it is reported in `skipped`
 /// and logged, and the uninstall goes on.
@@ -563,7 +563,7 @@ mod tests {
     impl Rig {
         fn new(tag: &str) -> Rig {
             let s = Scratch::new(tag);
-            let dir = std::env::temp_dir().join(format!("BlinkStartupFixture-adopt-{tag}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("HayateStartupFixture-adopt-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(dir.join("user")).unwrap();
             std::fs::create_dir_all(dir.join("common")).unwrap();
@@ -608,7 +608,7 @@ mod tests {
         App::new(String::new(), name.into(), r"C:\nope\fixture.exe".into())
     }
 
-    const N: &str = "BlinkStartupFixture One";
+    const N: &str = "HayateStartupFixture One";
 
     #[test]
     fn adopt_saves_the_record_first_then_disables_and_unmanage_restores_exactly() {
@@ -654,7 +654,7 @@ mod tests {
         r.run_value(Scope::User, N, r"C:\nope\fixture.exe");
         let e = r.entry(Scope::User, N);
         let out = adopt(&r.loc, &r.store, &e, app("One")).unwrap();
-        // the user flips it back on in Task Manager: different bytes than Blink wrote
+        // the user flips it back on in Task Manager: different bytes than Hayate wrote
         let theirs = vec![6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         approved::write(&r.loc, &e.id, Some(&theirs)).unwrap();
         let rel = release(&r.loc, &r.store, &out.app_id).unwrap();
@@ -761,10 +761,10 @@ mod tests {
     #[test]
     fn release_all_restores_every_owned_original() {
         let r = Rig::new("adopt-relall");
-        let ids = adopt_n(&r, &["BlinkStartupFixture R1", "BlinkStartupFixture R2"]);
+        let ids = adopt_n(&r, &["HayateStartupFixture R1", "HayateStartupFixture R2"]);
         let out = release_all(&r.loc, &r.store).unwrap();
         assert_eq!(out.restored, 2, "{out:?}");
-        for n in ["BlinkStartupFixture R1", "BlinkStartupFixture R2"] {
+        for n in ["HayateStartupFixture R1", "HayateStartupFixture R2"] {
             assert_eq!(r.live(Scope::User, n).approved, None, "{n} is back to its starting state");
         }
         let c = r.store.snapshot().cfg;
@@ -776,14 +776,14 @@ mod tests {
     #[test]
     fn release_all_failure_keeps_every_record_and_aborts() {
         let r = Rig::new("adopt-relall-fail");
-        let ids = adopt_n(&r, &["BlinkStartupFixture F1", "BlinkStartupFixture F2"]);
+        let ids = adopt_n(&r, &["HayateStartupFixture F1", "HayateStartupFixture F2"]);
         FAIL_REGISTRY_WRITE.with(|f| f.set(true));
         let err = release_all(&r.loc, &r.store).unwrap_err();
         FAIL_REGISTRY_WRITE.with(|f| f.set(false));
         assert!(err.contains("Nothing was removed"), "{err}");
         let c = r.store.snapshot().cfg;
         assert!(ids.iter().all(|i| c.app(i).unwrap().own.as_ref().is_some_and(|o| o.state == OwnState::Owned)), "records kept until release is confirmed");
-        for n in ["BlinkStartupFixture F1", "BlinkStartupFixture F2"] {
+        for n in ["HayateStartupFixture F1", "HayateStartupFixture F2"] {
             assert_eq!(approved::state_of(r.live(Scope::User, n).approved.as_deref()), State::Disabled, "{n} untouched");
         }
         // and a later attempt that works restores both
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn release_all_denied_for_a_machine_entry_aborts() {
         let r = Rig::new("adopt-relall-denied");
-        let id = adopt_n(&r, &["BlinkStartupFixture D1"]).remove(0);
+        let id = adopt_n(&r, &["HayateStartupFixture D1"]).remove(0);
         // a record whose original lives under an all-users location the test key cannot be written through:
         // simulate the denial with the injected registry failure on that single entry
         FAIL_REGISTRY_WRITE.with(|f| f.set(true));
@@ -808,22 +808,22 @@ mod tests {
     #[test]
     fn release_all_leaves_an_externally_changed_entry_and_reports_it() {
         let r = Rig::new("adopt-relall-ext");
-        adopt_n(&r, &["BlinkStartupFixture E1"]);
-        let id = EntryId::new(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture E1");
+        adopt_n(&r, &["HayateStartupFixture E1"]);
+        let id = EntryId::new(Kind::Run, Scope::User, View::Native, "HayateStartupFixture E1");
         let theirs = vec![6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         approved::write(&r.loc, &id, Some(&theirs)).unwrap();
         let out = release_all(&r.loc, &r.store).unwrap();
         assert_eq!(out.restored, 0);
         assert_eq!(out.left.len(), 1, "{out:?}");
-        assert_eq!(r.live(Scope::User, "BlinkStartupFixture E1").approved, Some(theirs), "not guessed at, not touched");
+        assert_eq!(r.live(Scope::User, "HayateStartupFixture E1").approved, Some(theirs), "not guessed at, not touched");
     }
 
-    /// A list Blink cannot fully read may hold ownership records: never "restore
+    /// A list Hayate cannot fully read may hold ownership records: never "restore
     /// nothing and delete the backup".
     #[test]
     fn release_all_refuses_when_an_owned_section_was_dropped_or_the_list_is_locked() {
         let r = Rig::new("adopt-relall-lossy");
-        adopt_n(&r, &["BlinkStartupFixture L1"]);
+        adopt_n(&r, &["HayateStartupFixture L1"]);
         let mut ini = r.on_disk();
         ini.push_str("\n[app]\nid=zz\nname=lost\ncommand=x.exe\nown.source=run|user|64|k\nown.state=owned\nown.original=none\nown.written=ff\n");
         std::fs::write(r.dir.join("startup.ini"), ini).unwrap();
@@ -838,7 +838,7 @@ mod tests {
     #[test]
     fn reconcile_resolves_interrupted_takeovers_without_touching_the_registry() {
         let r = Rig::new("adopt-reconcile");
-        for (i, n) in ["BlinkStartupFixture P1", "BlinkStartupFixture P2", "BlinkStartupFixture P3"].iter().enumerate() {
+        for (i, n) in ["HayateStartupFixture P1", "HayateStartupFixture P2", "HayateStartupFixture P3"].iter().enumerate() {
             r.run_value(Scope::User, n, r"C:\nope\f.exe");
             let id = EntryId::new(Kind::Run, Scope::User, View::Native, *n);
             let written = approved::disabled_bytes(100 + i as u64);
@@ -856,10 +856,10 @@ mod tests {
                 _ => approved::write(&r.loc, &id, Some(&approved::enabled_bytes())).unwrap(), // someone else changed it
             }
         }
-        let before: Vec<_> = (1..=3).map(|i| r.live(Scope::User, &format!("BlinkStartupFixture P{i}")).approved).collect();
+        let before: Vec<_> = (1..=3).map(|i| r.live(Scope::User, &format!("HayateStartupFixture P{i}")).approved).collect();
         let notes = reconcile(&r.loc, &r.store);
         assert_eq!(notes.len(), 3, "{notes:?}");
-        let after: Vec<_> = (1..=3).map(|i| r.live(Scope::User, &format!("BlinkStartupFixture P{i}")).approved).collect();
+        let after: Vec<_> = (1..=3).map(|i| r.live(Scope::User, &format!("HayateStartupFixture P{i}")).approved).collect();
         assert_eq!(before, after, "reconcile writes only the list, never the registry");
         let c = r.store.snapshot().cfg;
         assert_eq!(c.apps[0].own.as_ref().unwrap().state, OwnState::Owned);
@@ -950,9 +950,9 @@ mod tests {
         }
         // the REAL hives, read-only probing: writable() only tries to open the key
         let loc = Locations { hkcu: HKEY_CURRENT_USER, hklm: HKEY_LOCAL_MACHINE, user_dir: PathBuf::new(), common_dir: PathBuf::new() };
-        let id = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "BlinkStartupFixture DoesNotExist");
-        let e = Entry { id: id.clone(), raw: String::new(), command: String::new(), target: None, icon: String::new(), live: Live::new(true, None, None), is_blink: false, sig: None };
-        let store = Store::new(std::env::temp_dir().join("BlinkStartupFixture-nowrite.ini"));
+        let id = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "HayateStartupFixture DoesNotExist");
+        let e = Entry { id: id.clone(), raw: String::new(), command: String::new(), target: None, icon: String::new(), live: Live::new(true, None, None), is_hayate: false, sig: None };
+        let store = Store::new(std::env::temp_dir().join("HayateStartupFixture-nowrite.ini"));
         // the entry does not exist, so this stops at "no longer exists"; the rights pre-check is the same call chain
         assert!(set_enabled(&loc, &e, false, &store).is_err());
         assert!(can_write(&loc, &id).unwrap_err().contains("administrator"));
@@ -982,10 +982,10 @@ mod tests {
         app_id
     }
 
-    const M: &str = "BlinkStartupFixture Machine";
+    const M: &str = "HayateStartupFixture Machine";
 
     /// The P2 forgery: an all-users entry the admin disabled (or enabled), and a
-    /// record claiming Blink wrote exactly that value with the other state as
+    /// record claiming Hayate wrote exactly that value with the other state as
     /// "original". However it is given back (uninstall or unmanage), and even
     /// with administrator rights, no StartupApproved value is written.
     #[test]
@@ -1037,7 +1037,7 @@ mod tests {
     #[test]
     fn an_untrusted_record_never_aborts_the_uninstall() {
         let r = Rig::new("forged-uninstall");
-        adopt_n(&r, &["BlinkStartupFixture U1"]);
+        adopt_n(&r, &["HayateStartupFixture U1"]);
         r.run_value(Scope::AllUsers, M, r"C:\nope\machine.exe");
         let id = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, M);
         approved::write(&r.loc, &id, Some(&approved::disabled_bytes(55))).unwrap();
@@ -1057,12 +1057,12 @@ mod tests {
         writes();
         let out = release_all(&r.loc, &r.store).unwrap();
         assert_eq!((out.restored, out.skipped.len()), (1, 1), "{out:?}");
-        assert_eq!(writes(), vec![EntryId::new(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture U1")], "the per-user restore is unchanged");
-        assert_eq!(r.live(Scope::User, "BlinkStartupFixture U1").approved, None);
+        assert_eq!(writes(), vec![EntryId::new(Kind::Run, Scope::User, View::Native, "HayateStartupFixture U1")], "the per-user restore is unchanged");
+        assert_eq!(r.live(Scope::User, "HayateStartupFixture U1").approved, None);
         assert_eq!(r.live(Scope::AllUsers, M).approved, Some(approved::disabled_bytes(55)));
     }
 
-    /// A real all-users take-over (as an elevated Blink makes it) writes the
+    /// A real all-users take-over (as an elevated Hayate makes it) writes the
     /// protected copy before the original is touched, is given back through
     /// it, and a record edited afterwards no longer matches it.
     #[test]
@@ -1093,7 +1093,7 @@ mod tests {
         super::super::proof::TRUST_ANY_KEY.with(|t| t.set(false));
     }
 
-    /// Without a protected copy Blink could never give an all-users entry back,
+    /// Without a protected copy Hayate could never give an all-users entry back,
     /// so it does not take it over (an unelevated test run cannot create the
     /// admin-owned key, which stands in for every way that save can fail).
     #[test]
@@ -1158,7 +1158,7 @@ mod tests {
     /// Given back after somebody changed the value: the record is dropped and,
     /// when it proves exactly that record, so is the copy.
     #[test]
-    fn an_all_users_entry_changed_outside_blink_takes_its_own_copy_with_it() {
+    fn an_all_users_entry_changed_outside_hayate_takes_its_own_copy_with_it() {
         let r = Rig::new("changed-proof");
         super::super::proof::TRUST_ANY_KEY.with(|t| t.set(true));
         r.run_value(Scope::AllUsers, M, r"C:\nope\machine.exe");
@@ -1184,7 +1184,7 @@ mod tests {
     }
 
     /// An uninstall that gave every entry back also removes the protected key
-    /// once it is empty (and SOFTWARE\Blink when that is empty too).
+    /// once it is empty (and SOFTWARE\Hayate when that is empty too).
     #[test]
     fn release_all_removes_the_empty_protected_key() {
         let r = Rig::new("relall-tidy");
@@ -1196,7 +1196,7 @@ mod tests {
         let out = release_all(&r.loc, &r.store).unwrap();
         assert_eq!(out.restored, 1, "{out:?}");
         assert!(matches!(reg::open(r.loc.hklm, super::super::proof::KEY, KEY_READ), Err(e) if e.not_found()), "the empty key is gone");
-        assert!(matches!(reg::open(r.loc.hklm, r"SOFTWARE\Blink", KEY_READ), Err(e) if e.not_found()), "and its empty parent");
+        assert!(matches!(reg::open(r.loc.hklm, r"SOFTWARE\Hayate", KEY_READ), Err(e) if e.not_found()), "and its empty parent");
         super::super::proof::TRUST_ANY_KEY.with(|t| t.set(false));
     }
 
@@ -1211,11 +1211,11 @@ mod tests {
     }
 
     #[test]
-    fn blinks_own_autostart_cannot_be_taken_over() {
+    fn hayates_own_autostart_cannot_be_taken_over() {
         let r = Rig::new("self");
         r.run_value(Scope::User, N, r"C:\nope\fixture.exe");
         let mut e = r.entry(Scope::User, N);
-        e.is_blink = true;
+        e.is_hayate = true;
         let p = preview(&r.loc, &e, &r.store);
         assert!(p.blocked.unwrap().contains("Start with Windows"));
         assert!(adopt(&r.loc, &r.store, &e, app("Self")).is_err());

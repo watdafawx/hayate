@@ -1,11 +1,11 @@
-//! Taskbar access: an official Jump List on Blink's taskbar icon (Open Blink,
+//! Taskbar access: an official Jump List on Hayate's taskbar icon (Open Hayate,
 //! Processes, Vitals, Restart as administrator) and an optional snippet for
 //! Nilesoft Shell's taskbar background menu. See docs/taskbar.md.
 //!
-//! * The Jump List is `ICustomDestinationList` user tasks for Blink's app ID:
-//!   plain shell links to the installed blink.exe with one-shot arguments
+//! * The Jump List is `ICustomDestinationList` user tasks for Hayate's app ID:
+//!   plain shell links to the installed hayate.exe with one-shot arguments
 //!   (`logic::TASKS`). The shell keeps them, so they show for a pinned icon
-//!   that is not running too. Blink writes them only from an installed copy
+//!   that is not running too. Hayate writes them only from an installed copy
 //!   (a portable copy or a test instance would leave global entries pointing
 //!   at a throwaway folder), once per start at most, 8 s after start, and only
 //!   when the list changed (`jumplist.ini`). Removal needs the same standing.
@@ -14,8 +14,8 @@
 //!   commit later, uninstall closes the door for good. Never on the UI thread;
 //!   the UI thread never waits on the shell longer than a bounded uninstall wait.
 //! * Windows has no supported way to add to the empty-taskbar menu. The
-//!   Nilesoft snippet is text the user imports; Blink never edits shell.nss.
-//! * A start with `--open` / `--tab <name>` is routed to the running Blink
+//!   Nilesoft snippet is text the user imports; Hayate never edits shell.nss.
+//! * A start with `--open` / `--tab <name>` is routed to the running Hayate
 //!   (`forward`). `--restart-admin` is NOT: the process it started asks UAC
 //!   itself (`restart_admin`), because a posted window message cannot say who
 //!   sent it and must never be able to cause a prompt.
@@ -44,7 +44,7 @@ pub fn intent() -> Option<Intent> {
     parse_intent(&a)
 }
 
-/// A Blink is already running: hand it the intent (show / tab only) and say so.
+/// A Hayate is already running: hand it the intent (show / tab only) and say so.
 /// The caller exits. False when nothing runs or the intent has no wire form.
 pub fn forward(msg: u32, i: Intent) -> bool {
     let Some((wp, lp)) = to_wire(i) else { return false };
@@ -53,12 +53,12 @@ pub fn forward(msg: u32, i: Intent) -> bool {
         let _ = AllowSetForegroundWindow(ASFW_ANY);
         PostMessageW(Some(h), msg, WPARAM(wp), LPARAM(lp)).is_ok()
     };
-    log(&format!("taskbar: {i:?} forwarded to the running Blink: {ok}"));
+    log(&format!("taskbar: {i:?} forwarded to the running Hayate: {ok}"));
     ok
 }
 
-/// `--restart-admin` in an unelevated process: ask UAC for an elevated Blink
-/// from HERE. Nothing is posted to a running Blink, so no other process can make
+/// `--restart-admin` in an unelevated process: ask UAC for an elevated Hayate
+/// from HERE. Nothing is posted to a running Hayate, so no other process can make
 /// this prompt appear; the running one is untouched unless UAC is accepted (the
 /// elevated copy then asks it to quit, `quit_replaced`). A No ends here.
 pub fn restart_admin() {
@@ -71,7 +71,7 @@ pub fn restart_admin() {
         AdminRoute::ElevateNew => elevate(None),
         AdminRoute::ElevateReplace(pid) => elevate(Some(pid)),
         AdminRoute::Show => {
-            log("taskbar: restart as administrator: the running Blink is elevated already (or its token is unreadable): showing it, no prompt");
+            log("taskbar: restart as administrator: the running Hayate is elevated already (or its token is unreadable): showing it, no prompt");
             let _ = forward(crate::win::show_msg(), Intent::Open);
         }
     }
@@ -79,17 +79,17 @@ pub fn restart_admin() {
 
 fn elevate(replace: Option<u32>) {
     let Ok(exe) = std::env::current_exe() else { return };
-    let data = std::env::var("BLINK_DATA_DIR").ok().filter(|d| !d.is_empty());
+    let data = crate::osutil::env_var("DATA_DIR").ok().filter(|d| !d.is_empty());
     let r = classify(crate::setup::runas(&exe, &elevate_args(data, osutil::multi(), replace)));
     match r {
-        Elevated::Started => log("taskbar: restart as administrator: UAC accepted, elevated Blink started"),
-        Elevated::Cancelled => log("taskbar: restart as administrator: UAC cancelled, nothing started, the running Blink is untouched"),
+        Elevated::Started => log("taskbar: restart as administrator: UAC accepted, elevated Hayate started"),
+        Elevated::Cancelled => log("taskbar: restart as administrator: UAC cancelled, nothing started, the running Hayate is untouched"),
         Elevated::Failed(e) => log(&format!("taskbar: restart as administrator failed: {e}")),
     }
 }
 
 /// An elevated copy started with `--wait-pid <pid>`: when `pid` is an UNELEVATED
-/// Blink (the one this copy replaces after a Jump List UAC), ask it to quit.
+/// Hayate (the one this copy replaces after a Jump List UAC), ask it to quit.
 /// The message is not let through the integrity filter, so it only reaches a
 /// process that is not elevated, from a process that is.
 pub fn quit_replaced(pid: u32) {
@@ -103,7 +103,7 @@ pub fn quit_replaced(pid: u32) {
         unsafe {
             let _ = PostMessageW(Some(h), crate::win::quit_msg(), WPARAM(0), LPARAM(0));
         }
-        log(&format!("taskbar: asked the unelevated Blink (pid {pid}) to quit"));
+        log(&format!("taskbar: asked the unelevated Hayate (pid {pid}) to quit"));
     }
 }
 
@@ -161,12 +161,12 @@ unsafe fn task_link(exe: &str, t: &Task) -> Result<IShellLinkW> {
 }
 
 /// Debug builds on the disposable test identity only: stretch every shell call
-/// by BLINK_TEST_JUMPLIST_DELAY_MS before its commit gate, to exercise the
+/// by HAYATE_TEST_JUMPLIST_DELAY_MS before its commit gate, to exercise the
 /// switch / uninstall races against the real list.
 fn test_delay() {
     #[cfg(debug_assertions)]
     if crate::notify::test_aumid().is_some() {
-        if let Some(ms) = std::env::var("BLINK_TEST_JUMPLIST_DELAY_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+        if let Some(ms) = crate::osutil::env_var("TEST_JUMPLIST_DELAY_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
             std::thread::sleep(Duration::from_millis(ms.min(60_000)));
         }
     }
@@ -278,7 +278,7 @@ pub fn changed() {
 /// Settings > Uninstall: take the list out for good (a list left behind points at
 /// a deleted exe) and let no write reach the shell afterwards. Waits at most
 /// `wait`; the caller is the UI thread. Nothing happens for a copy that never
-/// owned the global list (portable, BLINK_MULTI).
+/// owned the global list (portable, HAYATE_MULTI).
 pub fn remove_for_uninstall(wait: Duration) {
     let c = coord();
     if !c.remove_for_good("uninstall") {
@@ -305,9 +305,9 @@ pub fn drain(wait: Duration) {
     }
 }
 
-/// `blink.exe --remove-jumplist` (install.ps1 -Uninstall): delete the list and
+/// `hayate.exe --remove-jumplist` (install.ps1 -Uninstall): delete the list and
 /// exit, no window. True when this process was started that way. A portable or
-/// BLINK_MULTI copy removes nothing.
+/// HAYATE_MULTI copy removes nothing.
 pub fn remove_cli() -> bool {
     if !std::env::args().skip(1).any(|a| a == ARG_REMOVE) {
         return false;
@@ -338,12 +338,12 @@ pub fn clear_note() {
     *NOTE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
-/// Where Save puts the snippet: Blink's own data dir, never Nilesoft's.
+/// Where Save puts the snippet: Hayate's own data dir, never Nilesoft's.
 pub fn snippet_path() -> PathBuf {
-    osutil::data_dir().join("nilesoft").join("blink-taskbar.nss")
+    osutil::data_dir().join("nilesoft").join("hayate-taskbar.nss")
 }
 
-/// The snippet text for the exe this Blink runs from (installed copies only).
+/// The snippet text for the exe this Hayate runs from (installed copies only).
 pub fn snippet() -> std::result::Result<String, String> {
     if !allowed() {
         return Err("Install Hayate first: a portable copy would leave a menu pointing at this folder".into());
@@ -352,7 +352,7 @@ pub fn snippet() -> std::result::Result<String, String> {
 }
 
 /// Save the snippet to `snippet_path()` on the I/O worker. BOTH paths are
-/// checked first (blink.exe, which goes into the menu, and the file's own path,
+/// checked first (hayate.exe, which goes into the menu, and the file's own path,
 /// which the user must write into `import '...'`); on a problem nothing is
 /// created or written, and the note says what to change.
 pub fn save_snippet() {

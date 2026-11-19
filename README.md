@@ -9,12 +9,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/watdafawx/hayate/releases/latest"><img src="https://img.shields.io/github/v/release/watdafawx/hayate?color=56c8d8&label=download" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4" alt="Windows">
-</p>
-
-<p align="center">
   <img src="docs/screenshots/overview.png" alt="Hayate Vitals tab: CPU load with per-core heat map by CCD, device list on the left" width="100%">
 </p>
 
@@ -29,7 +23,7 @@ things you normally need three other tools for: per-core CPU heat, sensors, an h
 manager that can delay and gate programs, a services manager, per-program rules, and alerts when something
 new or odd shows up.
 
-It is an actively developed project. Download the latest build from the [releases page](https://github.com/watdafawx/hayate/releases/latest) (see [Install](#install)).
+It is a personal, actively developed project. There is no public release page yet (see [Install](#install)).
 
 ## Screenshots
 
@@ -90,16 +84,16 @@ It is an actively developed project. Download the latest build from the [release
 
 ## Install
 
-Hayate is a single exe (`blink.exe`, see [Name](#name)). Windows 10 and 11 are declared in the manifest; it is
-developed and tested on Windows 11. There is no winget or Store package yet. Download `blink.exe` from the
-[latest release](https://github.com/watdafawx/hayate/releases/latest), or build it yourself ([Building](#building-from-source)).
+Hayate is a single exe (`hayate.exe`, see [Name](#name)). Windows 10 and 11 are declared in the manifest; it is
+developed and tested on Windows 11. There is no winget, Store or installer package yet, and no public
+download page: build it yourself ([Building](#building-from-source)) or use a build the maintainer gives you.
 
 Run the exe. A portable copy offers three choices in a banner at the top:
 
 | Choice | What it does |
 |---|---|
-| **Install just for me** | Copies Hayate to `%LOCALAPPDATA%\Programs\Blink`, adds Start menu entries (**Hayate** and **Hayate (admin)**) and an Installed apps entry. No admin needed. |
-| **Install for everyone** | In Settings → Install. Installs to `C:\Program Files\Blink` for all users; UAC prompt. |
+| **Install just for me** | Copies Hayate to `%LOCALAPPDATA%\Programs\Hayate`, adds Start menu entries (**Hayate** and **Hayate (admin)**) and an Installed apps entry. No admin needed. |
+| **Install for everyone** | In Settings → Install. Installs to `C:\Program Files\Hayate` for all users; UAC prompt. |
 | **Run without installing** | Runs the exe in place. Nothing is written: no shortcuts, no registry, no autostart. |
 
 Optional extras in the same dialog: start with Windows (hidden in the tray, never elevated) and update source.
@@ -110,7 +104,7 @@ Scripted install, from a checkout with a built exe:
 pwsh -File install.ps1                # per-user, no admin
 pwsh -File install.ps1 -Machine       # per-machine, from an elevated terminal
 pwsh -File install.ps1 -Autostart     # also start hidden at sign-in
-pwsh -File install.ps1 -UpdateFrom <folder>   # auto-update from a publish drop folder
+pwsh -File install.ps1 -UpdateFrom <folder>   # auto-update from a publish.ps1 drop folder
 ```
 
 ## Uninstall
@@ -142,7 +136,7 @@ redirect off first if it was on.
 
 - **No telemetry.** Hayate has no HTTP client and makes no internet connections of its own. (The "Install PawnIO" button runs `winget` after a UAC
   prompt; that is winget talking to its source, not Hayate.) Data it
-  keeps (settings, rules, logs, startup list, alert events) stays in `%LOCALAPPDATA%\Blink`. The optional
+  keeps (settings, rules, logs, startup list, alert events) stays in `%LOCALAPPDATA%\Hayate`. The optional
   network-health probes (one ICMP echo, DNS lookups, one TCP connect attempt) are off by default and only
   run while the window is visible; "Test this host" is click-only.
 - **What it reads:** process, service and driver lists, performance counters, GPU and drive sensors,
@@ -170,14 +164,16 @@ cargo build --release
 cargo test --release
 ```
 
-The binary is `target\release\blink.exe` (LTO, stripped). For the auto-update flow, put `blink.exe`, `blink.exe.sha256` and `version.txt` in one folder.
-
+The binary is `target\release\hayate.exe` (LTO, stripped). `publish.ps1` builds a release and copies it to
+`dist\` with a hash and version file for the auto-update flow.
 
 ## Name
 
-**Hayate** (疾風) means "swift wind". The project began as *Blink*, so the executable, the crate, the data
-folder (`%LOCALAPPDATA%\Blink`), the Start menu folder paths and the scripts are still called `blink`. The
-window, shortcuts and Installed apps entry say Hayate. Brand notes are in [docs/brand.md](docs/brand.md).
+**Hayate** (疾風) means "swift wind". The project began as *Blink*; v0.2.0 renamed the executable
+(`hayate.exe`), the crate, the data folder (`%LOCALAPPDATA%\Hayate`), the install folders, the Startup
+shortcut, the registry keys and the scripts. The pre-rename names are only read for compatibility (the
+legacy `Blink` uninstall key, legacy Start-menu links, legacy `BLINK_*` environment variables and the
+0.1.0 startup file header). Brand notes are in [docs/brand.md](docs/brand.md).
 
 ## License
 

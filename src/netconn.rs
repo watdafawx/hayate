@@ -543,9 +543,9 @@ mod tests {
         let mut a = [0u8; 16];
         a[10] = 0xff;
         a[11] = 0xff;
-        a[12..].copy_from_slice(&[10, 0, 0, 2]);
+        a[12..].copy_from_slice(&[192, 168, 50, 2]);
         let p6 = payload(5, &a, &[0u8; 16], 80, 4000);
-        assert_eq!(decode_conn(28, 0, &p6).unwrap().remote, ip(10, 0, 0, 2));
+        assert_eq!(decode_conn(28, 0, &p6).unwrap().remote, ip(192, 168, 50, 2));
     }
 
     fn obs(syn: u8, gap: u64, est: bool, retr: u8, age: u64, closed: bool) -> Obs {
@@ -576,9 +576,9 @@ mod tests {
 
     #[test]
     fn sequence_refused_connect() {
-        // observed on test machine: 3 SYN retransmits 0.5 s apart, then the close, no attempt event
+        // observed on rig: 3 SYN retransmits 0.5 s apart, then the close, no attempt event
         let mut t = Tracker::default();
-        let r = ip(10, 0, 0, 2);
+        let r = ip(192, 168, 50, 2);
         for (ms, ev) in [(1000, Ev::SynRetr), (1500, Ev::SynRetr), (2000, Ev::SynRetr), (2100, Ev::Close)] {
             t.event(&e(9, ev, r, 25565, 51000), ms);
         }
@@ -636,7 +636,7 @@ mod tests {
             t.event(&e(7, Ev::Close, r, 443, 50000), 1100);
         }
         // a failing pair afterwards still gets its own row, not the folded "more"
-        let r = ip(10, 0, 0, 2);
+        let r = ip(192, 168, 50, 2);
         t.event(&e(8, Ev::SynRetr, r, 25565, 40000), 2000);
         t.event(&e(8, Ev::Close, r, 25565, 40000), 2050);
         let f = t.export(3000);

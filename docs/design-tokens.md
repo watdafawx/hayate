@@ -1,6 +1,6 @@
-# Blink design tokens (v2 palette)
+# Hayate design tokens (v2 palette)
 
-Source of truth for the port of the design mock to Direct2D.
+Source of truth for the port of `docs/mock-vitals-lists.html` to Direct2D.
 Every value is a solid `0xRRGGBB` hex, ready for the `u32` constants in `src/ui/mod.rs`.
 No alpha blending is needed: the tints are precomputed against `PAN`.
 

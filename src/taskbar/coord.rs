@@ -1,8 +1,8 @@
-//! The one owner of every change to Blink's Jump List.
+//! The one owner of every change to Hayate's Jump List.
 //!
 //! Three things can ask for a change at about the same time: the 8 s start
 //! sync, the Settings switch, and uninstall. Windows keeps the list outside
-//! Blink, and a COM call into the shell can hang, so the rules are:
+//! Hayate, and a COM call into the shell can hang, so the rules are:
 //!
 //! * **One worker, one operation at a time.** A request (`request`) only sets
 //!   `dirty` and makes sure a worker runs. The worker clears `dirty`, reads the
@@ -168,7 +168,7 @@ impl<B: Backend> Coordinator<B> {
 
     /// Uninstall / `--remove-jumplist`: from now on no write can reach the shell,
     /// and the list is deleted once. False (nothing done) when this copy never
-    /// owned the global list (portable copy, `BLINK_MULTI`).
+    /// owned the global list (portable copy, `HAYATE_MULTI`).
     pub fn remove_for_good(self: &Arc<Self>, why: &'static str) -> bool {
         let i = self.b.inputs();
         if let Err(r) = eligible(&i.at, i.multi, i.test) {

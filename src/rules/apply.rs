@@ -41,7 +41,7 @@ fn prio_flag(p: Priority) -> PROCESS_CREATION_FLAGS {
 }
 
 /// Apply all actions once. Never retries. `reason` labels power requests
-/// ("Blink: game.exe running"). `create` is the creation time the caller
+/// ("Hayate: game.exe running"). `create` is the creation time the caller
 /// identified the process by: every handle used here is opened against it
 /// (`osutil::open_verified`), so a PID that was reused after the caller chose
 /// its target is never touched. `create == 0` (unknown) applies nothing.
@@ -259,7 +259,7 @@ fn restore_file() -> std::path::PathBuf {
     osutil::data_dir().join("power-restore.txt")
 }
 
-/// Call once at startup: if Blink died while holding a plan, put the user's plan back.
+/// Call once at startup: if Hayate died while holding a plan, put the user's plan back.
 pub fn recover_power_plan() {
     let f = restore_file();
     if let Ok(s) = std::fs::read_to_string(&f) {
@@ -357,7 +357,7 @@ pub fn hold_count() -> usize {
     holds().lock().unwrap().by_pid.len()
 }
 
-/// Blink shutdown: drop every hold and restore the plan.
+/// Hayate shutdown: drop every hold and restore the plan.
 pub fn release_all() {
     let pids: Vec<u32> = holds().lock().unwrap().by_pid.keys().copied().collect();
     for p in pids {

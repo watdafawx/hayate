@@ -201,16 +201,16 @@ impl ScopeHist {
     }
 }
 
-/// Debug builds only, `BLINK_TEST_NETSCOPE=1`: replaces a collecting feed with a synthetic
+/// Debug builds only, `HAYATE_TEST_NETSCOPE=1`: replaces a collecting feed with a synthetic
 /// one (a 24 s cycle of changing LAN / WAN rates and a 3 s baseline gap) so the scope graphs
-/// can be inspected without an elevated Blink. Besides the pid 0 row it adds rows of the first
+/// can be inspected without an elevated Hayate. Besides the pid 0 row it adds rows of the first
 /// few live processes `ids`, so the Top by Network list has rows to read. Never compiled into
 /// release builds.
 #[cfg(debug_assertions)]
 pub fn synthetic(now_ms: u64, real: Feed, ids: &std::collections::HashMap<u32, i64>) -> Feed {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    if real.status == Status::Off || !*ON.get_or_init(|| std::env::var_os("BLINK_TEST_NETSCOPE").is_some()) {
+    if real.status == Status::Off || !*ON.get_or_init(|| crate::osutil::env_var_os("TEST_NETSCOPE").is_some()) {
         return real;
     }
     let s = now_ms / 1000;

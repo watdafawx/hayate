@@ -19,8 +19,8 @@ pub mod scan;
 pub mod sched;
 pub mod store;
 
-/// `blink.exe --startup-release` (install.ps1 -Uninstall, headless): give every
-/// Windows startup entry Blink switched off back. Exit code 0 = everything Blink
+/// `hayate.exe --startup-release` (install.ps1 -Uninstall, headless): give every
+/// Windows startup entry Hayate switched off back. Exit code 0 = everything Hayate
 /// owned is back (or nothing was owned); 1 = something could not be given back, and
 /// the uninstaller must remove NOTHING. The result goes to the log; there is no console.
 pub const ARG_RELEASE: &str = "--startup-release";

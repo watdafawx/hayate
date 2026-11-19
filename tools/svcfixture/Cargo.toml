@@ -2,10 +2,10 @@
 name = "svcfixture"
 version = "0.1.0"
 edition = "2021"
-description = "Disposable Windows service used to test Blink's Services tab on a throwaway machine. Does nothing."
+description = "Disposable Windows service used to test Hayate's Services tab on a throwaway machine. Does nothing."
 publish = false
 
-# not part of Blink's build: its own workspace
+# not part of Hayate's build: its own workspace
 [workspace]
 
 [dependencies.windows]

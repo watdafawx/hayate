@@ -239,9 +239,9 @@ mod tests {
 
     #[test]
     fn ignore_defaults() {
-        std::env::set_var("BLINK_TEST_TMP", "C:\\Users\\me\\AppData\\Local\\Temp\\");
-        let g: Vec<String> = DEFAULT_IGNORE.iter().map(|s| expand(s)).chain(std::iter::once(expand("%BLINK_TEST_TMP%\\*"))).collect();
-        assert!(ignored("X:\\Dev\\blink\\target\\debug\\blink.exe", &g));
+        std::env::set_var("HAYATE_TEST_TMP", "C:\\Users\\me\\AppData\\Local\\Temp\\");
+        let g: Vec<String> = DEFAULT_IGNORE.iter().map(|s| expand(s)).chain(std::iter::once(expand("%HAYATE_TEST_TMP%\\*"))).collect();
+        assert!(ignored("X:\\Dev\\hayate\\target\\debug\\hayate.exe", &g));
         assert!(ignored("X:\\Dev\\h\\target\\release\\build\\x-123\\build-script-build.exe", &g));
         assert!(ignored("X:\\Dev\\h\\target\\x86_64-pc-windows-msvc\\deps\\sync_bench-0123abcd.exe", &g));
         assert!(ignored("C:\\Users\\me\\AppData\\Local\\Temp\\setup.exe", &g));
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn seen_roundtrip_and_changes() {
-        let d = std::env::temp_dir().join(format!("blink-apps-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("hayate-apps-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&d);
         let f = d.join("seen.tsv");
         let _ = std::fs::remove_file(&f);
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn seeded_unknown_then_learned() {
-        let d = std::env::temp_dir().join(format!("blink-apps-seed-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("hayate-apps-seed-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&d);
         let f = d.join("seen.tsv");
         let _ = std::fs::remove_file(&f);

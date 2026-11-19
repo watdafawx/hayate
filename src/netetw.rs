@@ -1,6 +1,6 @@
 //! Per-process network traffic for Vitals > Network "TOP BY NETWORK".
 //!
-//! Source: ETW real-time session "Blink-Kernel-Network" on
+//! Source: ETW real-time session "Hayate-Kernel-Network" on
 //! Microsoft-Windows-Kernel-Network ({7dd42a49-5329-4832-8dfd-43d979153a88}),
 //! keywords 0x10 (IPv4) | 0x20 (IPv6), event-ID filter in the kernel to the
 //! eight data-transfer events:
@@ -23,7 +23,7 @@
 //! The same session also takes the connection events 12/13/14/16/17 (+16 for IPv6): ids and
 //! confirmed meanings are documented at the top of `netconn.rs` (15 is the accept side, there is
 //! no outbound "completed" event). They add no outbound traffic and are only enabled with the
-//! same session: Network detail visible and Blink elevated.
+//! same session: Network detail visible and Hayate elevated.
 //! Direction comes from the event ID, never from the addresses. Traffic whose
 //! two endpoints are the same host (loopback, own address) never touches a NIC
 //! and is skipped.
@@ -34,7 +34,7 @@
 //! 1.1.1.1): TCP events (10/11/26/27) carry the peer in `daddr` for both directions;
 //! UDP events (42/43/58/59) keep the packet order, a send to `daddr`, a receive from
 //! `saddr`. The IPv6 TCP roles follow the IPv4 TCP ones (same event class) but were not
-//! measured live: this machine has no routable IPv6 peer. `netetw_scopes` re-checks the
+//! measured live: this rig has no routable IPv6 peer. `netetw_scopes` re-checks the
 //! IPv4 cases against a LAN and a public peer. The
 //! address is classified in the callback and dropped: only per-process byte counters
 //! are kept, nothing about an endpoint is stored or logged. The scope follows the
@@ -51,10 +51,10 @@
 //! so it costs nothing the rest of the time. Memory is bounded: 4-16 x 64 KB
 //! ETW buffers, and at most `MAX_PIDS` accumulator entries.
 //!
-//! Sessions are named per instance (`Blink-Kernel-Network-<pid>-<create>-<n>`) and
+//! Sessions are named per instance (`Hayate-Kernel-Network-<pid>-<create>-<n>`) and
 //! stopped only through the handle that started them. A leftover session is
 //! stopped only when the process named in it provably no longer exists; one of a
-//! live Blink, or of unknown owner, is never touched.
+//! live Hayate, or of unknown owner, is never touched.
 //!
 //! Rates are computed per sampler tick by [`Collector::tick`]: bytes since the
 //! last drain divided by the real elapsed time. Bytes of a PID count only when
@@ -313,7 +313,7 @@ pub enum Status {
     Collecting,
     /// Session is up; `rows` are real rates (an empty list means no process traffic).
     Live,
-    /// StartTrace / EnableTraceEx2 refused: needs an elevated Blink.
+    /// StartTrace / EnableTraceEx2 refused: needs an elevated Hayate.
     NeedsAdmin,
     /// Session could not start or died; retried with backoff.
     Unavailable(String),
@@ -687,12 +687,15 @@ impl<B: Backend> Collector<B> {
 
 // ---- ETW backend ----------------------------------------------------------------------------
 
-/// Every session this program starts is named `Blink-Kernel-Network-<pid>-<create>-<n>`:
+/// Every session this program starts is named `Hayate-Kernel-Network-<pid>-<create>-<n>`:
 /// the owner's PID and creation time (hex FILETIME) and a per-process counter. Two
-/// Blinks (BLINK_MULTI, two users, a relaunch that overlaps) therefore never share a
+/// Hayates (HAYATE_MULTI, two users, a relaunch that overlaps) therefore never share a
 /// name, so neither can stop or take over the other's session, and a leftover session
 /// names its dead owner.
-const SESSION_PREFIX: &str = "Blink-Kernel-Network-";
+const SESSION_PREFIX: &str = "Hayate-Kernel-Network-";
+/// Sessions left by the pre-rename build carry the same owner fields under the
+/// old product name; the dead-owner cleanup recognises both (one-time sweep).
+const LEGACY_SESSION_PREFIX: &str = "Blink-Kernel-Network-";
 
 pub fn session_name(pid: u32, create: i64, seq: u32) -> String {
     format!("{SESSION_PREFIX}{pid}-{create:x}-{seq}")
@@ -702,7 +705,7 @@ pub fn session_name(pid: u32, create: i64, seq: u32) -> String {
 /// other name, including the shared names of earlier builds: with no owner to
 /// check, those are never touched.
 pub fn session_owner(name: &str) -> Option<(u32, i64)> {
-    let rest = name.strip_prefix(SESSION_PREFIX)?;
+    let rest = name.strip_prefix(SESSION_PREFIX).or_else(|| name.strip_prefix(LEGACY_SESSION_PREFIX))?;
     let mut it = rest.split('-');
     let pid: u32 = it.next()?.parse().ok()?;
     let create = i64::from_str_radix(it.next()?, 16).ok()?;
@@ -757,7 +760,7 @@ impl QpcClock {
     }
 }
 
-/// Events seen by the callback (diagnostics, BLINK_TIMING and tests).
+/// Events seen by the callback (diagnostics, HAYATE_TIMING and tests).
 pub static EVENTS: AtomicU64 = AtomicU64::new(0);
 
 struct Props {
@@ -807,7 +810,7 @@ fn all_session_names() -> Vec<String> {
     bufs.iter().take(n as usize).map(|b| b.logger_name()).collect()
 }
 
-/// Stop leftover sessions of Blinks that no longer exist (crash, kill). Never a
+/// Stop leftover sessions of Hayates that no longer exist (crash, kill). Never a
 /// session whose owner is alive or unknown: the owner is the creation-time-checked
 /// process in the name, never a guess.
 fn stop_orphans() {
@@ -931,7 +934,7 @@ impl Backend for EtwBackend {
             let done = Arc::new(AtomicBool::new(false));
             let d2 = done.clone();
             let thv = th.Value;
-            match std::thread::Builder::new().name("blink-netetw".into()).stack_size(128 * 1024).spawn(move || {
+            match std::thread::Builder::new().name("hayate-netetw".into()).stack_size(128 * 1024).spawn(move || {
                 let _keep = lname;
                 let th = PROCESSTRACE_HANDLE { Value: thv };
                 let _ = ProcessTrace(&[th], None, None);
@@ -1060,7 +1063,7 @@ mod tests {
     }
 
     const D4: [u8; 4] = [93, 184, 216, 34];
-    const S4: [u8; 4] = [10, 0, 1, 20];
+    const S4: [u8; 4] = [192, 168, 1, 20];
 
     fn t(pid: u32, bytes: u32, dir: Dir, scope: Scope) -> Decoded {
         Decoded::Traffic(Traffic { pid, bytes, dir, scope })
@@ -1195,7 +1198,7 @@ mod tests {
             ((172, 16, 0, 1), Lan),
             ((172, 31, 255, 255), Lan),
             ((172, 32, 0, 1), Wan),
-            ((10, 0, 0, 3), Lan),
+            ((192, 168, 50, 3), Lan),
             ((192, 169, 0, 1), Wan),
             // link-local, link-scope multicast, limited broadcast
             ((169, 254, 3, 4), Lan),
@@ -1290,7 +1293,7 @@ mod tests {
         use Scope::*;
         for (a, want) in [
             ("::ffff:10.1.2.3", Lan),
-            ("::ffff:10.0.2.9", Lan),
+            ("::ffff:192.168.0.9", Lan),
             ("::ffff:169.254.1.1", Lan),
             ("::ffff:8.8.8.8", Wan),
             ("::ffff:100.64.0.1", Other),
@@ -1308,19 +1311,19 @@ mod tests {
 
     #[test]
     fn scope_follows_the_remote_end_of_each_direction() {
-        let lan = [10, 0, 0, 3];
+        let lan = [192, 168, 50, 3];
         let wan = [93, 184, 216, 34];
         // send (id 10 / 42): the destination is the remote; payload order is daddr, saddr
         for id in [10u16, 42] {
             assert_eq!(decode(id, 0, &ev(1, 7, &wan, &lan)), t(1, 7, Dir::Up, Scope::Wan), "id {id} to a public host");
-            assert_eq!(decode(id, 0, &ev(1, 7, &[10, 0, 0, 9], &lan)), t(1, 7, Dir::Up, Scope::Lan), "id {id} to a LAN host");
+            assert_eq!(decode(id, 0, &ev(1, 7, &[192, 168, 50, 9], &lan)), t(1, 7, Dir::Up, Scope::Lan), "id {id} to a LAN host");
         }
         // UDP receive (43): the packet's source (saddr) is the remote
         assert_eq!(decode(43, 0, &ev(1, 7, &lan, &wan)), t(1, 7, Dir::Down, Scope::Wan), "udp from a public host");
-        assert_eq!(decode(43, 0, &ev(1, 7, &lan, &[10, 0, 0, 9])), t(1, 7, Dir::Down, Scope::Lan), "udp from a LAN host");
+        assert_eq!(decode(43, 0, &ev(1, 7, &lan, &[192, 168, 50, 9])), t(1, 7, Dir::Down, Scope::Lan), "udp from a LAN host");
         // TCP receive (11): the peer is in daddr, as on a send
         assert_eq!(decode(11, 0, &ev(1, 7, &wan, &lan)), t(1, 7, Dir::Down, Scope::Wan), "tcp from a public host");
-        assert_eq!(decode(11, 0, &ev(1, 7, &[10, 0, 0, 9], &lan)), t(1, 7, Dir::Down, Scope::Lan), "tcp from a LAN host");
+        assert_eq!(decode(11, 0, &ev(1, 7, &[192, 168, 50, 9], &lan)), t(1, 7, Dir::Down, Scope::Lan), "tcp from a LAN host");
         // IPv6 with the same rules, and a v4-mapped peer on a dual-stack socket
         let p6 = "2606:4700::1111".parse::<std::net::Ipv6Addr>().unwrap().octets();
         let l6 = "fe80::1".parse::<std::net::Ipv6Addr>().unwrap().octets();
@@ -1331,12 +1334,12 @@ mod tests {
         assert_eq!(decode(59, 0, &ev(1, 7, &p6, &m6)), t(1, 7, Dir::Down, Scope::Lan));
     }
 
-    /// The four events of a live capture (elevated, host 10.0.0.3 talking to its router
+    /// The four events of a live capture (elevated, rig 10.0.0.3 talking to its router
     /// 10.0.0.1 and to 1.1.1.1; payload order daddr, saddr), as the kernel delivered them.
     #[test]
     fn live_captured_roles_classify_by_the_peer() {
-        let me = [10, 0, 0, 3];
-        let router = [10, 0, 0, 1];
+        let me = [192, 168, 50, 3];
+        let router = [192, 168, 50, 1];
         let cf = [1, 1, 1, 1];
         // UDP: a send names the peer as daddr; a receive has the peer as saddr
         assert_eq!(decode(42, 0, &ev(1, 29, &router, &me)), t(1, 29, Dir::Up, Scope::Lan));
@@ -1497,11 +1500,11 @@ mod tests {
         assert_eq!(session_owner(&a), Some((100, 0xABC)));
         assert_eq!(session_owner(&reused_pid), Some((100, 0xABD)));
         // the shared names of earlier builds name no owner: never touched
-        assert_eq!(session_owner("Blink-Kernel-Network"), None);
-        assert_eq!(session_owner("Blink-Kernel-Network-Multi"), None);
-        assert_eq!(session_owner("Blink-Kernel-Network-4-ff-1"), None, "system pids are not owners");
-        assert_eq!(session_owner("Blink-Kernel-Network-100-0-1"), None, "no create time, no identity");
-        assert_eq!(session_owner("Blink-Kernel-Network-100-ff-1-x"), None);
+        assert_eq!(session_owner("Hayate-Kernel-Network"), None);
+        assert_eq!(session_owner("Hayate-Kernel-Network-Multi"), None);
+        assert_eq!(session_owner("Hayate-Kernel-Network-4-ff-1"), None, "system pids are not owners");
+        assert_eq!(session_owner("Hayate-Kernel-Network-100-0-1"), None, "no create time, no identity");
+        assert_eq!(session_owner("Hayate-Kernel-Network-100-ff-1-x"), None);
         assert_eq!(session_owner("Other-100-ff-1"), None);
         // a real name from this process
         let mine = next_name();
@@ -1516,7 +1519,7 @@ mod tests {
         let dead = session_name(200, 0xB, 1); // owner exited
         let reused = session_name(300, 0xC, 1); // pid 300 exists, but it is another process now
         let unknown = session_name(400, 0xD, 1); // owner cannot be checked
-        let names: Vec<String> = [&alive, &dead, &reused, &unknown].iter().map(|s| s.to_string()).chain(["Blink-Kernel-Network".into(), "Blink-Kernel-Network-Multi".into(), "NT Kernel Logger".into(), "EventLog-System".into()]).collect();
+        let names: Vec<String> = [&alive, &dead, &reused, &unknown].iter().map(|s| s.to_string()).chain(["Hayate-Kernel-Network".into(), "Hayate-Kernel-Network-Multi".into(), "NT Kernel Logger".into(), "EventLog-System".into()]).collect();
         // `gone` is only true when the exact owner (pid AND create time) is provably not running
         let gone = |pid: u32, create: i64| matches!((pid, create), (200, 0xB) | (300, 0xC));
         assert_eq!(orphans(&names, &gone), vec![dead, reused]);
@@ -1799,7 +1802,7 @@ mod tests {
     // ---- live (elevated) ----------------------------------------------------------
 
     /// From an ADMIN shell: `cargo test netetw_two_sessions --release -- --ignored --nocapture`.
-    /// Two sessions of one process (two Blinks share the same code path) run side by side
+    /// Two sessions of one process (two Hayates share the same code path) run side by side
     /// under different names; stopping one leaves the other delivering, and starting a
     /// third does not evict either.
     #[test]
@@ -1887,7 +1890,7 @@ mod tests {
     }
 
     /// From an ADMIN shell: `cargo test netetw_scopes --release -- --ignored --nocapture`
-    /// with `BLINK_TEST_LAN=<ip of a LAN host that answers DNS on 53 and HTTP on 80>`
+    /// with `HAYATE_TEST_LAN=<ip of a LAN host that answers DNS on 53 and HTTP on 80>`
     /// (the router). Sends two small DNS queries over UDP and two tiny HTTP GETs over
     /// TCP, one pair to the LAN host and one to the public 1.1.1.1, and checks that
     /// this process's bytes land in the LAN / WAN buckets matching the app-level
@@ -1899,9 +1902,9 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::{SocketAddr, TcpStream, UdpSocket};
         use std::time::Duration;
-        let lan_ip = std::env::var("BLINK_TEST_LAN").expect("BLINK_TEST_LAN=<LAN host ip>");
+        let lan_ip = crate::osutil::env_var("TEST_LAN").expect("HAYATE_TEST_LAN=<LAN host ip>");
         let wan_ip = "1.1.1.1";
-        assert_eq!(classify(&lan_ip.parse::<std::net::Ipv4Addr>().unwrap().octets()), Scope::Lan, "BLINK_TEST_LAN must be private");
+        assert_eq!(classify(&lan_ip.parse::<std::net::Ipv4Addr>().unwrap().octets()), Scope::Lan, "HAYATE_TEST_LAN must be private");
         let mut be = EtwBackend::default();
         match be.start() {
             Ok(()) => {}

@@ -1,5 +1,5 @@
 //! One-shot process actions: trim, restart (unelevated / as admin), close
-//! windows, locate, and an unelevated launcher Blink can reuse (Startup tab).
+//! windows, locate, and an unelevated launcher Hayate can reuse (Startup tab).
 
 use windows::core::{BOOL, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -43,7 +43,7 @@ pub fn trim(pid: u32, create: i64) -> Result<(), String> {
 /// Start `cmdline` unelevated. Returns the new pid, or 0 when Explorer started
 /// it (the shell does not report a pid).
 ///
-/// Elevated Blink asks Explorer (already unelevated) to run it through
+/// Elevated Hayate asks Explorer (already unelevated) to run it through
 /// IShellDispatch2::ShellExecute: no token APIs, no privileges, the documented
 /// approach. Only if that fails does it fall back to Explorer's token.
 pub fn launch_unelevated(cmdline: &str, cwd: Option<&str>) -> Result<u32, String> {
@@ -182,21 +182,21 @@ fn verified_shell_token() -> Result<Handle, String> {
     Ok(prim)
 }
 
-/// How a program is started for the user. Chosen from Blink's own elevation and
+/// How a program is started for the user. Chosen from Hayate's own elevation and
 /// the kind of target alone, so it can be unit-tested.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UserWay {
-    /// Blink is not elevated: a child of Blink already has the user's normal token
+    /// Hayate is not elevated: a child of Hayate already has the user's normal token
     Direct,
-    /// Blink is not elevated, target is a shortcut / shell item: the shell opens it
+    /// Hayate is not elevated, target is a shortcut / shell item: the shell opens it
     ShellOpen,
-    /// Blink is elevated: Explorer starts it; fallback only the verified shell token.
-    /// Never CreateProcess with Blink's own token.
+    /// Hayate is elevated: Explorer starts it; fallback only the verified shell token.
+    /// Never CreateProcess with Hayate's own token.
     ThroughExplorer,
 }
 
-pub(crate) fn user_way(blink_elevated: bool, shell_item: bool) -> UserWay {
-    match (blink_elevated, shell_item) {
+pub(crate) fn user_way(hayate_elevated: bool, shell_item: bool) -> UserWay {
+    match (hayate_elevated, shell_item) {
         (true, _) => UserWay::ThroughExplorer,
         (false, true) => UserWay::ShellOpen,
         (false, false) => UserWay::Direct,
@@ -297,7 +297,7 @@ fn shell_token() -> Result<Handle, String> {
     }
 }
 
-/// Plain CreateProcess: inherits Blink's elevated token.
+/// Plain CreateProcess: inherits Hayate's elevated token.
 pub fn launch_elevated(cmdline: &str, cwd: Option<&str>) -> Result<u32, String> {
     unsafe {
         let mut cl = wide(cmdline);
@@ -324,7 +324,7 @@ pub fn launch_elevated(cmdline: &str, cwd: Option<&str>) -> Result<u32, String> 
 }
 
 /// Terminate and relaunch with the same command line (cwd = exe folder).
-/// `as_admin` = keep Blink's elevation; default is unelevated. Returns new pid.
+/// `as_admin` = keep Hayate's elevation; default is unelevated. Returns new pid.
 ///
 /// The process is opened ONCE, verified against `create`, and the image path,
 /// command line and the terminate all come from that handle: what is relaunched
@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn an_elevated_blink_never_starts_programs_with_its_own_token() {
+    fn an_elevated_hayate_never_starts_programs_with_its_own_token() {
         assert_eq!(user_way(true, false), UserWay::ThroughExplorer);
         assert_eq!(user_way(true, true), UserWay::ThroughExplorer);
         assert_eq!(user_way(false, false), UserWay::Direct);
@@ -436,7 +436,7 @@ mod tests {
     }
 
     /// RED against the old gate (`is_elevated()` = `elevation().unwrap_or(false)`): a token that could not be
-    /// read counted as a normal user and took the direct CreateProcess route with Blink's own token.
+    /// read counted as a normal user and took the direct CreateProcess route with Hayate's own token.
     #[test]
     fn an_unreadable_token_starts_nothing() {
         for shell in [false, true] {

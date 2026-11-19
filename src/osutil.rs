@@ -11,9 +11,31 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::QueryDosDeviceW;
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 
-/// The product name every user-visible text uses. Files, folders, registry
-/// names, window classes and env vars keep their `Blink` names on purpose.
+/// The product name every user-visible text uses.
 pub const APP_NAME: &str = "Hayate";
+
+/// Environment variable prefix of the pre-rename build whose value is still read
+/// when the `HAYATE_` name is not set (rig tooling and older docs use them).
+const LEGACY_ENV: &str = "BLINK_";
+
+fn env_key(suffix: &str) -> String {
+    format!("HAYATE_{suffix}")
+}
+
+/// `HAYATE_<suffix>`, else the pre-rename `BLINK_<suffix>` (never removed: scripts
+/// and rig test setups still set the old names).
+pub fn env_var(suffix: &str) -> Result<String, std::env::VarError> {
+    match std::env::var(env_key(suffix)) {
+        Ok(v) => Ok(v),
+        Err(std::env::VarError::NotPresent) => std::env::var(format!("{LEGACY_ENV}{suffix}")),
+        Err(e) => Err(e),
+    }
+}
+
+/// [`env_var`] as an `OsString` (`None` when neither name is set).
+pub fn env_var_os(suffix: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(env_key(suffix)).or_else(|| std::env::var_os(format!("{LEGACY_ENV}{suffix}")))
+}
 
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -40,43 +62,43 @@ pub unsafe fn from_pwstr(p: *const u16) -> String {
     String::from_utf16_lossy(std::slice::from_raw_parts(p, n))
 }
 
-/// `BLINK_MULTI=1`: dev/test instance next to the user's running Blink: skips
-/// the single-instance check, uses its own window class, ETW session name and
-/// (unless BLINK_DATA_DIR is set) its own data dir `%LOCALAPPDATA%\Blink-multi`.
+/// `HAYATE_MULTI=1` (or legacy `BLINK_MULTI=1`): dev/test instance next to the user's
+/// running Hayate: skips the single-instance check, uses its own window class, ETW
+/// session name and (unless HAYATE_DATA_DIR is set) its own data dir `%LOCALAPPDATA%\Hayate-multi`.
 pub fn multi() -> bool {
     static M: OnceLock<bool> = OnceLock::new();
-    *M.get_or_init(|| !KNOWN_ONLY.load(std::sync::atomic::Ordering::Relaxed) && std::env::var_os("BLINK_MULTI").is_some_and(|v| v != "0"))
+    *M.get_or_init(|| !KNOWN_ONLY.load(std::sync::atomic::Ordering::Relaxed) && env_var_os("MULTI").is_some_and(|v| v != "0"))
 }
 
 /// Set in an elevated uninstall / all-users install: the data dir is the token user's known-folder
-/// `LocalAppData\Blink`, whatever BLINK_DATA_DIR / BLINK_MULTI / `--update-data-dir` say.
+/// `LocalAppData\Hayate`, whatever HAYATE_DATA_DIR / HAYATE_MULTI / `--update-data-dir` say.
 static KNOWN_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn lock_data_dir_to_known_folder() {
     KNOWN_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// `%LOCALAPPDATA%\Blink`, created on first use. Tests can redirect it with BLINK_DATA_DIR.
-/// Unit tests never touch the real one: without BLINK_DATA_DIR they get
-/// `%TEMP%\blink-test-<pid>` (cleared by a later run once a day old).
+/// `%LOCALAPPDATA%\Hayate`, created on first use. Tests can redirect it with HAYATE_DATA_DIR.
+/// Unit tests never touch the real one: without HAYATE_DATA_DIR they get
+/// `%TEMP%\hayate-test-<pid>` (cleared by a later run once a day old).
 pub fn data_dir() -> PathBuf {
     let known = KNOWN_ONLY.load(std::sync::atomic::Ordering::Relaxed);
     let p = if known {
         match crate::setup::local_app_data() {
-            Some(b) => PathBuf::from(b).join("Blink"),
+            Some(b) => PathBuf::from(b).join("Hayate"),
             None => return PathBuf::from(REFUSED_DATA_DIR),
         }
-    } else if let Ok(d) = std::env::var("BLINK_DATA_DIR") {
+    } else if let Some(d) = env_var_os("DATA_DIR") {
         PathBuf::from(d)
     } else if cfg!(test) {
         test_data_dir()
     } else {
         let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
-        PathBuf::from(base).join(if multi() { "Blink-multi" } else { "Blink" })
+        PathBuf::from(base).join(if multi() { "Hayate-multi" } else { "Hayate" })
     };
-    // An elevated Blink never follows a link out of the user-writable data dir (the medium
+    // An elevated Hayate never follows a link out of the user-writable data dir (the medium
     // user can turn it into a junction/symlink): it gets a path nothing can be opened under,
     // so reads see defaults and writes fail, instead of writing wherever the link points.
-    if is_elevated() && !cfg!(test) && (known || std::env::var_os("BLINK_DATA_DIR").is_none()) && reparse_in_chain(&p) {
+    if is_elevated() && !cfg!(test) && (known || env_var_os("DATA_DIR").is_none()) && reparse_in_chain(&p) {
         return PathBuf::from(REFUSED_DATA_DIR);
     }
     let _ = std::fs::create_dir_all(&p);
@@ -108,7 +130,7 @@ pub fn user_sid_hex() -> Option<String> {
 }
 
 /// A path with an illegal name (no I/O, no lookup, always fails): stands in for a data dir that was refused.
-pub const REFUSED_DATA_DIR: &str = r"|:\blink-data-dir-refused";
+pub const REFUSED_DATA_DIR: &str = r"|:\hayate-data-dir-refused";
 
 /// Is `p` or any existing folder above it a reparse point (junction, symlink, mount point)?
 pub fn reparse_in_chain(p: &std::path::Path) -> bool {
@@ -127,21 +149,21 @@ pub fn windows_dir() -> Result<String, String> {
     Ok(from_wide(&b[..n]))
 }
 
-/// True in the elevated Blink the Task Manager launcher cold-started: its PATH is minimal and
+/// True in the elevated Hayate the Task Manager launcher cold-started: its PATH is minimal and
 /// bare-name launches (winget) cannot work, so those actions are off there.
 static COLD_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn cold_started() -> bool {
     COLD_STARTED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// The cold-started elevated Blink writes no log: its `%LOCALAPPDATA%\Blink` is the medium
+/// The cold-started elevated Hayate writes no log: its `%LOCALAPPDATA%\Hayate` is the medium
 /// user's (docs/task-manager-replacement.md §7.3a "Data dir").
 static NO_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn disable_log() {
     NO_LOG.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Called once in the cold-started elevated Blink: marks it cold-started and silences its log.
+/// Called once in the cold-started elevated Hayate: marks it cold-started and silences its log.
 pub fn mark_cold_started() {
     COLD_STARTED.store(true, std::sync::atomic::Ordering::Relaxed);
     disable_log();
@@ -157,12 +179,12 @@ fn test_data_dir() -> PathBuf {
             let day = std::time::Duration::from_secs(86400);
             for e in rd.flatten() {
                 let old = e.metadata().and_then(|m| m.modified()).map(|t| t.elapsed().map(|a| a > day).unwrap_or(false)).unwrap_or(false);
-                if old && e.file_name().to_string_lossy().starts_with("blink-test-") {
+                if old && e.file_name().to_string_lossy().starts_with("hayate-test-") {
                     let _ = std::fs::remove_dir_all(e.path());
                 }
             }
         }
-        tmp.join(format!("blink-test-{}", std::process::id()))
+        tmp.join(format!("hayate-test-{}", std::process::id()))
     })
     .clone()
 }
@@ -504,11 +526,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_env_names_are_still_read() {
+        const S: &str = "RENAME_GUARD_PROBE";
+        std::env::remove_var("HAYATE_RENAME_GUARD_PROBE");
+        std::env::set_var("BLINK_RENAME_GUARD_PROBE", "old");
+        assert_eq!(env_var(S).as_deref(), Ok("old"));
+        assert_eq!(env_var_os(S).as_deref(), Some(std::ffi::OsStr::new("old")));
+        std::env::set_var("HAYATE_RENAME_GUARD_PROBE", "new");
+        assert_eq!(env_var(S).as_deref(), Ok("new"));
+        assert_eq!(env_var_os(S).as_deref(), Some(std::ffi::OsStr::new("new")), "HAYATE_ wins");
+        std::env::remove_var("HAYATE_RENAME_GUARD_PROBE");
+        std::env::remove_var("BLINK_RENAME_GUARD_PROBE");
+        assert!(env_var(S).is_err() && env_var_os(S).is_none());
+    }
+
+    #[test]
     fn tests_never_use_the_real_data_dir() {
-        if std::env::var_os("BLINK_DATA_DIR").is_none() {
+        if env_var_os("DATA_DIR").is_none() {
             let d = data_dir();
             assert!(d.starts_with(std::env::temp_dir()), "{d:?}");
-            assert!(d.file_name().unwrap().to_string_lossy().starts_with("blink-test-"));
+            assert!(d.file_name().unwrap().to_string_lossy().starts_with("hayate-test-"));
         }
     }
 
@@ -518,7 +555,7 @@ mod tests {
     }
 }
 
-/// Tiny diagnostic log: %LOCALAPPDATA%\Blink\blink.log, reset when > 256 KB.
+/// Tiny diagnostic log: %LOCALAPPDATA%\Hayate\hayate.log, reset when > 256 KB.
 pub fn log(line: &str) {
     let line = format!("{} {}
 ", now_unix(), line);
@@ -536,7 +573,7 @@ fn log_now(line: &str) {
     if NO_LOG.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
-    let p = data_dir().join("blink.log");
+    let p = data_dir().join("hayate.log");
     if std::fs::metadata(&p).map(|m| m.len() > 256 * 1024).unwrap_or(false) {
         let _ = std::fs::remove_file(&p);
     }

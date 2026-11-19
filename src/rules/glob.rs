@@ -50,9 +50,9 @@ mod tests {
         assert!(matches("*.exe", "C:\\a\\b.EXE"));
         assert!(matches("X:\\Games\\*\\*.exe", "x:\\games\\Foo\\bin\\foo.exe"));
         assert!(!matches("X:\\Games\\*\\*.exe", "x:\\other\\foo.exe"));
-        assert!(matches("*\\target\\debug\\*", "X:\\Dev\\blink\\target\\debug\\blink.exe"));
+        assert!(matches("*\\target\\debug\\*", "X:\\Dev\\hayate\\target\\debug\\hayate.exe"));
         assert!(matches("*\\target\\*\\deps\\*", "X:\\Dev\\h\\target\\release\\deps\\h-0a1b2c.exe"));
-        assert!(!matches("*\\target\\debug\\*", "X:\\Dev\\blink\\target\\release\\blink.exe"));
+        assert!(!matches("*\\target\\debug\\*", "X:\\Dev\\hayate\\target\\release\\hayate.exe"));
         assert!(matches("setup?.exe", "SETUP1.exe"));
         assert!(!matches("setup?.exe", "setup.exe"));
         assert!(matches("*", ""));

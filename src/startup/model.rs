@@ -1,5 +1,5 @@
-//! The managed startup list: what the user asked Blink to start at logon, and
-//! the exact original state of every startup entry Blink took over.
+//! The managed startup list: what the user asked Hayate to start at logon, and
+//! the exact original state of every startup entry Hayate took over.
 //!
 //! Plain data + validation + a one-line-per-field text format (no new
 //! dependency). Everything read from disk is untrusted: sizes, ranges, names,
@@ -17,13 +17,15 @@ pub const MAX_PROCESS: usize = 128;
 pub const MAX_DELAY_MS: u32 = 3_600_000;
 /// Larger than this is not a config this feature wrote.
 pub const MAX_FILE_BYTES: usize = 512 * 1024;
-const FORMAT: &str = "blink-startup 1";
+const FORMAT: &str = "hayate-startup 1";
+/// Written by 0.1.0: still read as the current format (data, not migration code).
+const LEGACY_FORMAT: &str = "blink-startup 1";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OwnState {
     /// the owning record is saved but the original is not disabled yet (or the step is unproven)
     Pending,
-    /// the original is disabled by Blink and the record says exactly what to put back
+    /// the original is disabled by Hayate and the record says exactly what to put back
     Owned,
 }
 
@@ -32,9 +34,9 @@ pub enum OwnState {
 pub struct Own {
     pub source: EntryId,
     pub state: OwnState,
-    /// StartupApproved bytes of the entry before Blink touched it (None = no value)
+    /// StartupApproved bytes of the entry before Hayate touched it (None = no value)
     pub original: Option<Vec<u8>>,
-    /// the bytes Blink wrote to disable it; restore only while the live value is still these
+    /// the bytes Hayate wrote to disable it; restore only while the live value is still these
     pub written: Vec<u8>,
     /// the Run value / file path as it was when adopted (to report a later external change)
     pub raw_at_adopt: String,
@@ -65,7 +67,7 @@ impl App {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
-    /// run the list at logon when Blink starts (default OFF: nothing runs until the user opts in)
+    /// run the list at logon when Hayate starts (default OFF: nothing runs until the user opts in)
     pub manage: bool,
     pub apps: Vec<App>,
     pub next_id: u32,
@@ -271,7 +273,7 @@ pub struct Loaded {
     /// acted on with its administrator-protected copy (`proof`), and an
     /// unreadable one, forged or not, must not block an uninstall.
     pub dropped_owned: usize,
-    /// set when the file is from a newer Blink: do not overwrite it
+    /// set when the file is from a newer Hayate: do not overwrite it
     pub locked: Option<String>,
 }
 
@@ -283,8 +285,8 @@ pub fn parse(text: &str) -> Loaded {
     }
     let mut lines = text.lines();
     match lines.next().map(str::trim) {
-        Some(h) if h == FORMAT => {}
-        Some(h) if h.starts_with("blink-startup ") => {
+        Some(h) if h == FORMAT || h == LEGACY_FORMAT => {}
+        Some(h) if h.starts_with("hayate-startup ") || h.starts_with("blink-startup ") => {
             out.locked = Some("startup list was written by a newer Hayate".into());
             return out;
         }
@@ -430,7 +432,7 @@ mod tests {
 
     #[test]
     fn newer_or_foreign_files_are_locked_not_overwritten() {
-        assert!(parse("blink-startup 2\nmanage=1\n").locked.is_some());
+        assert!(parse("hayate-startup 2\nmanage=1\n").locked.is_some());
         assert!(parse("[[app]]\nname = \"x\"\n").locked.is_some());
         assert!(parse(&"x".repeat(MAX_FILE_BYTES + 1)).locked.is_some());
     }

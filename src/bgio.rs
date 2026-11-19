@@ -72,7 +72,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn spawn_worker(gen: u64) -> bool {
-    std::thread::Builder::new().name("blink-io".into()).stack_size(256 * 1024).spawn(move || run(gen)).is_ok()
+    std::thread::Builder::new().name("hayate-io".into()).stack_size(256 * 1024).spawn(move || run(gen)).is_ok()
 }
 
 fn push(item: Item, fast: bool) {
@@ -355,14 +355,14 @@ impl<T: Clone + Send + 'static> Cell<T> {
 
 // ---------- fault injection (debug builds) ----------
 
-/// `BLINK_FAKE_STALL=disk:5000[,pawnio:3000,meta:2000,scm:2000]` makes that
+/// `HAYATE_FAKE_STALL=disk:5000[,pawnio:3000,meta:2000,scm:2000]` makes that
 /// worker path sleep the given ms, to prove the sampler and UI never wait.
 /// `disk` covers drive temperature queries and process-detail file reads.
 pub fn fake_stall(kind: &str) {
     #[cfg(debug_assertions)]
     {
         static CFG: std::sync::OnceLock<Vec<(String, u64)>> = std::sync::OnceLock::new();
-        let cfg = CFG.get_or_init(|| std::env::var("BLINK_FAKE_STALL").map(|v| parse_stall(&v)).unwrap_or_default());
+        let cfg = CFG.get_or_init(|| crate::osutil::env_var("FAKE_STALL").map(|v| parse_stall(&v)).unwrap_or_default());
         if let Some((_, ms)) = cfg.iter().find(|(k, _)| k == kind) {
             std::thread::sleep(Duration::from_millis(*ms));
         }

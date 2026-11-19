@@ -38,8 +38,8 @@ pub struct Entry {
     /// image whose icon the row shows
     pub icon: String,
     pub live: Live,
-    /// this entry starts Blink itself
-    pub is_blink: bool,
+    /// this entry starts Hayate itself
+    pub is_hayate: bool,
     /// what the command / shortcut looked like when it was read (None = it
     /// could not be read, so taking it over is refused)
     pub sig: Option<SourceSig>,
@@ -47,7 +47,7 @@ pub struct Entry {
 
 /// The exact content a startup entry runs from: the registry value as stored
 /// (type and raw bytes) or the shortcut file (length and a FNV-1a hash of its
-/// bytes). Compared again before and after Blink takes the entry over, so an
+/// bytes). Compared again before and after Hayate takes the entry over, so an
 /// installer that replaced the program in between is noticed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceSig {
@@ -197,8 +197,8 @@ pub fn scan(loc: &Locations) -> Scan {
                 }
             };
             let icon = crate::osutil::clean_image_path(&command);
-            let is_blink = is_blink_image(&icon);
-            entries.push(Entry { id, raw, command, target: None, icon, live, is_blink, sig: Some(SourceSig::Run(ty, data_copy)) });
+            let is_hayate = is_hayate_image(&icon);
+            entries.push(Entry { id, raw, command, target: None, icon, live, is_hayate, sig: Some(SourceSig::Run(ty, data_copy)) });
         }
     }
     for scope in [Scope::User, Scope::AllUsers] {
@@ -216,7 +216,7 @@ pub fn scan(loc: &Locations) -> Scan {
             }
         };
         let mut n = 0;
-        // shortcuts are parsed by the shell's COM code: only from a Blink that is
+        // shortcuts are parsed by the shell's COM code: only from a Hayate that is
         // provably NOT elevated (the folder is user-writable; a high process must
         // not feed it to a parser). Unknown elevation counts as elevated.
         let parse_links = crate::osutil::elevation() == Some(false);
@@ -262,17 +262,17 @@ pub fn scan(loc: &Locations) -> Scan {
                 Some(t) => t.path.clone(),
                 None => file.clone(),
             };
-            let is_blink = target.as_ref().is_some_and(|t| is_blink_image(&t.path)) || (!is_lnk && is_blink_image(&file));
+            let is_hayate = target.as_ref().is_some_and(|t| is_hayate_image(&t.path)) || (!is_lnk && is_hayate_image(&file));
             let sig = if reparse { None } else { file_sig(&e.path()) };
-            entries.push(Entry { id, raw: file.clone(), command: file.clone(), target, icon, live, is_blink, sig });
+            entries.push(Entry { id, raw: file.clone(), command: file.clone(), target, icon, live, is_hayate, sig });
         }
     }
     entries.sort_by(|a, b| a.display().to_lowercase().cmp(&b.display().to_lowercase()).then_with(|| a.id.encode().cmp(&b.id.encode())));
     Scan { entries, problems }
 }
 
-/// Is this image Blink itself (its own exe, or any `blink.exe`)?
-pub fn is_blink_image(path: &str) -> bool {
+/// Is this image Hayate itself (its own exe, or any `hayate.exe`)?
+pub fn is_hayate_image(path: &str) -> bool {
     let p = path.trim().trim_matches('"');
     if p.is_empty() {
         return false;
@@ -282,7 +282,7 @@ pub fn is_blink_image(path: &str) -> bool {
             return true;
         }
     }
-    crate::osutil::file_name(p).eq_ignore_ascii_case("blink.exe")
+    crate::osutil::file_name(p).eq_ignore_ascii_case("hayate.exe")
 }
 
 /// Read a `.lnk` file's stored target (no search, no UI). `None` when the file
@@ -333,8 +333,8 @@ mod tests {
 
     #[test]
     fn expands_known_vars_and_leaves_the_rest() {
-        std::env::set_var("BLINK_FIXTURE_VAR", "C:\\Fx");
-        assert_eq!(expand_env("%BLINK_FIXTURE_VAR%\\a.exe"), "C:\\Fx\\a.exe");
+        std::env::set_var("HAYATE_FIXTURE_VAR", "C:\\Fx");
+        assert_eq!(expand_env("%HAYATE_FIXTURE_VAR%\\a.exe"), "C:\\Fx\\a.exe");
         assert_eq!(expand_env("%NOPE_NOT_SET_1%\\a"), "%NOPE_NOT_SET_1%\\a");
         assert_eq!(expand_env("100% sure %"), "100% sure %");
         assert_eq!(expand_env("%%"), "%%");
@@ -343,31 +343,31 @@ mod tests {
     #[test]
     fn scans_run_values_in_each_source_with_identity_and_state() {
         let s = Scratch::new("scan");
-        let tmp = std::env::temp_dir().join(format!("BlinkStartupFixture-scan-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("HayateStartupFixture-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("user")).unwrap();
         std::fs::create_dir_all(tmp.join("common")).unwrap();
         let loc = Locations { hkcu: s.user.0, hklm: s.machine.0, user_dir: tmp.join("user"), common_dir: tmp.join("common") };
-        set_text(loc.hkcu, approved::RUN, "BlinkStartupFixture A", REG_SZ, r"C:\nope\a.exe --x");
-        set_text(loc.hklm, approved::RUN, "BlinkStartupFixture A", REG_SZ, r"C:\nope\machine.exe");
-        set_text(loc.hklm, approved::RUN32, "BlinkStartupFixture A", REG_EXPAND_SZ, r"%BLINK_SCAN_FX%\w.exe");
-        std::env::set_var("BLINK_SCAN_FX", "C:\\Expanded");
+        set_text(loc.hkcu, approved::RUN, "HayateStartupFixture A", REG_SZ, r"C:\nope\a.exe --x");
+        set_text(loc.hklm, approved::RUN, "HayateStartupFixture A", REG_SZ, r"C:\nope\machine.exe");
+        set_text(loc.hklm, approved::RUN32, "HayateStartupFixture A", REG_EXPAND_SZ, r"%HAYATE_SCAN_FX%\w.exe");
+        std::env::set_var("HAYATE_SCAN_FX", "C:\\Expanded");
         std::fs::write(tmp.join("user").join("Folder One.lnk"), b"not a real shortcut").unwrap();
         std::fs::write(tmp.join("user").join("desktop.ini"), b"x").unwrap();
         std::fs::write(tmp.join("common").join("Common One.bat"), b"@echo off").unwrap();
-        let id_disabled = EntryId::new(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture A");
+        let id_disabled = EntryId::new(Kind::Run, Scope::User, View::Native, "HayateStartupFixture A");
         approved::write(&loc, &id_disabled, Some(&approved::disabled_bytes(approved::filetime_now()))).unwrap();
 
         let sc = scan(&loc);
         let by =|kind, scope, view, key: &str| sc.entries.iter().find(|e| e.id == EntryId::new(kind, scope, view, key)).unwrap_or_else(|| panic!("missing {key}: {:?}", sc.entries.iter().map(|e| e.id.encode()).collect::<Vec<_>>()));
         // same name in three sources = three separate entries, never merged
-        let a_user = by(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture A");
-        let a_all = by(Kind::Run, Scope::AllUsers, View::Native, "BlinkStartupFixture A");
-        let a_32 = by(Kind::Run, Scope::AllUsers, View::Wow32, "BlinkStartupFixture A");
+        let a_user = by(Kind::Run, Scope::User, View::Native, "HayateStartupFixture A");
+        let a_all = by(Kind::Run, Scope::AllUsers, View::Native, "HayateStartupFixture A");
+        let a_32 = by(Kind::Run, Scope::AllUsers, View::Wow32, "HayateStartupFixture A");
         assert_eq!(a_user.command, r"C:\nope\a.exe --x");
         assert_eq!(a_user.state(), approved::State::Disabled);
         assert_eq!(a_all.command, r"C:\nope\machine.exe");
-        assert_eq!(a_32.raw, r"%BLINK_SCAN_FX%\w.exe", "the stored value is kept unexpanded");
+        assert_eq!(a_32.raw, r"%HAYATE_SCAN_FX%\w.exe", "the stored value is kept unexpanded");
         assert_eq!(a_32.command, r"C:\Expanded\w.exe");
         // the user-scope StartupApproved value is the per-user override of the all-users entry too
         assert_eq!(a_all.live.user_override, a_user.live.approved);
@@ -382,10 +382,10 @@ mod tests {
     }
 
     #[test]
-    fn blink_itself_is_recognised() {
-        assert!(is_blink_image(r"C:\Users\x\AppData\Local\Programs\Blink\blink.exe"));
-        assert!(is_blink_image(r#""D:\tools\Blink.EXE""#));
-        assert!(!is_blink_image(r"C:\Program Files\Other\other.exe"));
-        assert!(!is_blink_image(""));
+    fn hayate_itself_is_recognised() {
+        assert!(is_hayate_image(r"C:\Users\x\AppData\Local\Programs\Hayate\hayate.exe"));
+        assert!(is_hayate_image(r#""D:\tools\Hayate.EXE""#));
+        assert!(!is_hayate_image(r"C:\Program Files\Other\other.exe"));
+        assert!(!is_hayate_image(""));
     }
 }

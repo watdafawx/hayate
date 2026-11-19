@@ -1,7 +1,7 @@
 //! Catch-up gate: decides which System-log events may toast.
 //!
 //! When the subscription resumes after a saved bookmark, Windows first
-//! delivers everything that happened while Blink was closed. Those events are
+//! delivers everything that happened while Hayate was closed. Those events are
 //! always logged, but only toast when they fall inside a short, recent gap
 //! (the previous session ended < 24 h ago), and only when there are few of
 //! them. Anything older (or a whole replayed log) is logged as read, silently.
@@ -10,7 +10,7 @@ use super::AlertType;
 
 /// Event this close before Watch started still counts as live.
 pub const GRACE_MS: u64 = 60_000;
-/// Longest "Blink was closed" gap whose events may still toast.
+/// Longest "Hayate was closed" gap whose events may still toast.
 pub const MAX_GAP_MS: u64 = 24 * 3600 * 1000;
 /// Bookmark save time is only throttled-accurate; accept events a bit older.
 pub const SLACK_MS: u64 = 5 * 60 * 1000;
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn no_bookmark_means_old() {
-        // dev PC 2026-11-16: whole System log (months) replayed, no valid bookmark
+        // FOX 2026-11-16: whole System log (months) replayed, no valid bookmark
         let months_ago = 1_792_222_069_000;
         assert_eq!(classify(months_ago, START, None), Verdict::Old);
         assert_eq!(classify(START - 2 * GRACE_MS, START, None), Verdict::Old);

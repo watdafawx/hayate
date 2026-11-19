@@ -210,7 +210,7 @@ pub struct NetState {
 
 /// Light sampling (window hidden: History only) re-reads just the adapters
 /// the last full enumeration kept, one GetIfEntry2 each: GetIfTable2 walks
-/// every interface including the filter and miniport shims (dev PC: 3.2 ms vs
+/// every interface including the filter and miniport shims (FOX: 3.2 ms vs
 /// 0.33 ms for 8 kept adapters). Every LIGHT_FULL-th light sample (hidden
 /// NIC samples come every 3 s: 60 s) enumerates again to pick up new ones.
 const LIGHT_FULL: u32 = 20;
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn ipv4_and_mac_text() {
-        assert_eq!(fmt_ipv4([10, 0, 0, 3]), "10.0.0.3");
+        assert_eq!(fmt_ipv4([192, 168, 50, 3]), "10.0.0.3");
         assert_eq!(fmt_mac(&[0x9c, 0x6b, 0, 0x4a]), "9C-6B-00-4A");
     }
 

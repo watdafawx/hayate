@@ -1,10 +1,10 @@
-//! Safeguards for "Disallow running": processes Blink must never end, however a
+//! Safeguards for "Disallow running": processes Hayate must never end, however a
 //! rule is written (hand-edited rules.ini, a pasted rule, a bug in the UI).
 //!
 //! Layers, all of which must pass (there is no override, no setting and no
 //! "force" path):
-//! 1. static, from the live image path and PID: PID <= 4, Blink itself, any
-//!    Blink program (own file, `blink*.exe` helpers, update and parked copies),
+//! 1. static, from the live image path and PID: PID <= 4, Hayate itself, any
+//!    Hayate program (own file, `hayate*.exe` helpers, update and parked copies),
 //!    anything inside the Windows folder or the Defender folders, and a list of
 //!    essential system program names wherever they sit on disk;
 //! 2. the OS's own answer, `IsProcessCritical` on the retained handle: ending a
@@ -38,7 +38,7 @@ use crate::osutil;
 pub enum Refusal {
     SystemPid,
     OwnProcess,
-    BlinkProgram,
+    HayateProgram,
     WindowsFolder,
     SecurityTool,
     EssentialName,
@@ -55,7 +55,7 @@ impl Refusal {
         match self {
             Refusal::SystemPid => "refused: the System process is never ended".into(),
             Refusal::OwnProcess => "refused: Hayate never ends itself".into(),
-            Refusal::BlinkProgram => "refused: Hayate never ends its own helper, updater or other Hayate program".into(),
+            Refusal::HayateProgram => "refused: Hayate never ends its own helper, updater or other Hayate program".into(),
             Refusal::WindowsFolder => "refused: programs in the Windows folder are never ended".into(),
             Refusal::SecurityTool => "refused: Windows security programs are never ended".into(),
             Refusal::EssentialName => "refused: essential Windows program, never ended".into(),
@@ -83,7 +83,7 @@ const ESSENTIAL: &[&str] = &[
 #[derive(Clone, Debug)]
 pub struct Ctx {
     pub own_pid: u32,
-    /// normalized path of Blink's own exe
+    /// normalized path of Hayate's own exe
     pub own_exe: String,
     /// normalized directories whose programs are never ended
     pub dirs: Vec<(String, Refusal)>,
@@ -211,10 +211,10 @@ pub fn path_check(ctx: &Ctx, path: Option<&str>) -> Result<(), Refusal> {
         return Err(Refusal::OwnProcess);
     }
     let name = osutil::file_name(&n);
-    // blink.exe, blink.new.exe, blink-1234.exe (parked), blink-multi copies...
+    // hayate.exe, hayate.new.exe, hayate-1234.exe (parked), hayate-multi copies...
     let own_name = osutil::file_name(&ctx.own_exe);
-    if name.starts_with("blink") || (!own_name.is_empty() && name == own_name) {
-        return Err(Refusal::BlinkProgram);
+    if name.starts_with("hayate") || (!own_name.is_empty() && name == own_name) {
+        return Err(Refusal::HayateProgram);
     }
     for (dir, why) in &ctx.dirs {
         if under(&n, dir) {
@@ -241,7 +241,7 @@ pub fn static_check(ctx: &Ctx, pid: u32, path: Option<&str>) -> Result<(), Refus
 /// Can a Disallow rule for this exe name / exact path ever act? `Some` = never (it would
 /// only match programs the static layer always refuses), so the rule is not created, or is
 /// dropped at load. A bare name is judged as if it sat in an ordinary folder (only the name
-/// list and the Blink names apply); a path is judged fully, 8.3 short names expanded when
+/// list and the Hayate names apply); a path is judged fully, 8.3 short names expanded when
 /// the file exists. Pure name/path protection: no process and no PID is involved.
 pub fn pattern_refusal(pattern: &str) -> Option<Refusal> {
     pattern_refusal_in(Ctx::system(), pattern)
@@ -298,7 +298,7 @@ mod tests {
     fn ctx() -> Ctx {
         Ctx {
             own_pid: 4242,
-            own_exe: norm(r"C:\Users\Me\AppData\Local\Programs\Blink\blink.exe"),
+            own_exe: norm(r"C:\Users\Me\AppData\Local\Programs\Hayate\hayate.exe"),
             dirs: vec![(norm(r"C:\Windows"), Refusal::WindowsFolder), (norm(r"C:\Program Files\Windows Defender"), Refusal::SecurityTool)],
         }
     }
@@ -313,17 +313,17 @@ mod tests {
     }
 
     #[test]
-    fn blink_programs_are_refused_wherever_they_sit() {
+    fn hayate_programs_are_refused_wherever_they_sit() {
         let c = ctx();
-        assert_eq!(static_check(&c, 900, Some(r"C:\Users\Me\AppData\Local\Programs\Blink\blink.exe")), Err(Refusal::OwnProcess));
+        assert_eq!(static_check(&c, 900, Some(r"C:\Users\Me\AppData\Local\Programs\Hayate\hayate.exe")), Err(Refusal::OwnProcess));
         for p in [
-            r"D:\copy\blink.exe",
-            r"C:\Users\Me\AppData\Local\Temp\Blink-uninstalled\blink-77.exe",
-            r"C:\Users\Me\AppData\Local\Programs\Blink\blink.new.exe",
-            r"E:\t\Blink-Multi.exe",
-            r"\\?\C:\Downloads\BLINK.EXE",
+            r"D:\copy\hayate.exe",
+            r"C:\Users\Me\AppData\Local\Temp\Hayate-uninstalled\hayate-77.exe",
+            r"C:\Users\Me\AppData\Local\Programs\Hayate\hayate.new.exe",
+            r"E:\t\Hayate-Multi.exe",
+            r"\\?\C:\Downloads\HAYATE.EXE",
         ] {
-            assert_eq!(static_check(&c, 900, Some(p)), Err(Refusal::BlinkProgram), "{p}");
+            assert_eq!(static_check(&c, 900, Some(p)), Err(Refusal::HayateProgram), "{p}");
         }
     }
 
@@ -350,9 +350,9 @@ mod tests {
     #[test]
     fn rules_that_could_only_ever_be_refused_are_not_creatable() {
         assert_eq!(pattern_refusal("csrss.exe"), Some(Refusal::EssentialName));
-        assert_eq!(pattern_refusal("BLINK.exe"), Some(Refusal::BlinkProgram));
+        assert_eq!(pattern_refusal("HAYATE.exe"), Some(Refusal::HayateProgram));
         assert!(matches!(pattern_refusal(r"C:\Windows\System32\notepad.exe"), Some(Refusal::WindowsFolder)));
-        assert_eq!(pattern_refusal("zz_blink_disallow_fixture.exe"), None);
+        assert_eq!(pattern_refusal("zz_hayate_disallow_fixture.exe"), None);
         assert_eq!(pattern_refusal(r"D:\Games\game.exe"), None);
     }
 
@@ -379,10 +379,10 @@ mod tests {
         // too many `..` stop at the drive root: no wrap-around into another folder
         assert_eq!(path_check(&c, Some(r"C:\..\..\..\Windows\x.exe")), Err(Refusal::WindowsFolder));
         assert_eq!(path_check(&c, Some(r"C:\Games\..\Games\g.exe")), Ok(()));
-        // a trailing dot or space cannot hide an essential or Blink name
+        // a trailing dot or space cannot hide an essential or Hayate name
         assert_eq!(path_check(&c, Some(r"D:\t\svchost.exe.")), Err(Refusal::EssentialName));
         assert_eq!(path_check(&c, Some(r"D:\t\svchost.exe ")), Err(Refusal::EssentialName));
-        assert_eq!(path_check(&c, Some(r"D:\t\Blink.exe.")), Err(Refusal::BlinkProgram));
+        assert_eq!(path_check(&c, Some(r"D:\t\Hayate.exe.")), Err(Refusal::HayateProgram));
         // UNC names are kept apart from drive paths
         assert_eq!(norm(r"\\?\UNC\srv\share\a.exe"), r"\\srv\share\a.exe");
         assert_eq!(norm(r"\\srv\share\a.exe"), r"\\srv\share\a.exe");
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(pattern_refusal_in(&c, r"D:\Games\game.exe"), None);
         assert_eq!(pattern_refusal_in(&c, "svchost.exe"), Some(Refusal::EssentialName));
         assert_eq!(pattern_refusal_in(&c, "svchost.exe."), Some(Refusal::EssentialName));
-        assert_eq!(pattern_refusal_in(&c, "blink-x.exe"), Some(Refusal::BlinkProgram));
+        assert_eq!(pattern_refusal_in(&c, "hayate-x.exe"), Some(Refusal::HayateProgram));
         assert_eq!(pattern_refusal_in(&c, r"C:\Windows\.\System32\x.exe"), Some(Refusal::WindowsFolder));
         assert_eq!(pattern_refusal_in(&c, r"C:/Windows/System32/x.exe"), Some(Refusal::WindowsFolder));
         assert_eq!(pattern_refusal_in(&c, r"\\?\C:\Windows\x.exe"), Some(Refusal::WindowsFolder));
@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(static_check(&c, 900, None), Err(Refusal::NoImage));
         assert_eq!(static_check(&c, 900, Some("  ")), Err(Refusal::NoImage));
         assert_eq!(static_check(&c, 900, Some(r"C:\Games\Game\game.exe")), Ok(()));
-        assert_eq!(static_check(&c, 900, Some(r"X:\Dev\blinkless-fixture\zz_blink_disallow_fixture.exe")), Ok(()));
+        assert_eq!(static_check(&c, 900, Some(r"C:\src\hayateless-fixture\zz_hayate_disallow_fixture.exe")), Ok(()));
     }
 
     #[test]

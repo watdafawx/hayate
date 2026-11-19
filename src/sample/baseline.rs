@@ -26,16 +26,16 @@ pub const RING: usize = 60;
 pub const MIN_SAMPLES: usize = 15;
 /// Seconds one sample covers.
 pub const SAMPLE_SECS: f64 = 60.0;
-/// Test-only override of `SAMPLE_SECS` (smoke tests): shortens the minute so the 15 sample
+/// Test-only override of `SAMPLE_SECS` (rig smoke tests): shortens the minute so the 15 sample
 /// minimum is reached in seconds. Compiled in debug builds only: release always uses `SAMPLE_SECS`.
 #[cfg(debug_assertions)]
-pub const ENV_SAMPLE_SECS: &str = "BLINK_NET_BASELINE_SECS";
+pub const ENV_SAMPLE_SECS: &str = "NET_BASELINE_SECS";
 
 /// Seconds per sample: `SAMPLE_SECS`, or the test override (1..=3600).
 #[cfg(debug_assertions)]
 pub fn sample_secs() -> f64 {
     static S: OnceLock<f64> = OnceLock::new();
-    *S.get_or_init(|| std::env::var(ENV_SAMPLE_SECS).ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| (1.0..=3600.0).contains(v)).unwrap_or(SAMPLE_SECS))
+    *S.get_or_init(|| crate::osutil::env_var(ENV_SAMPLE_SECS).ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| (1.0..=3600.0).contains(v)).unwrap_or(SAMPLE_SECS))
 }
 
 /// Release: no environment hook.

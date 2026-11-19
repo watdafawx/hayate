@@ -1,6 +1,6 @@
 //! Process start/stop feed for Rules and Watch.
 //!
-//! Primary: ETW real-time session "Blink-Kernel-Process" on
+//! Primary: ETW real-time session "Hayate-Kernel-Process" on
 //! Microsoft-Windows-Kernel-Process (keyword 0x10). One thread blocked in
 //! ProcessTrace, 2-4 x 64 KB buffers, ~0 CPU. Needs admin.
 //! Fallback (session cannot start / dies): 2 s process-list diff on a
@@ -22,10 +22,10 @@ use windows::Win32::System::Diagnostics::ToolHelp::*;
 use crate::osutil::{self, wide};
 use crate::sample::nt;
 
-pub const SESSION: &str = "Blink-Kernel-Process";
-/// Session name; a BLINK_MULTI test instance must not stop the user's session.
+pub const SESSION: &str = "Hayate-Kernel-Process";
+/// Session name; a HAYATE_MULTI test instance must not stop the user's session.
 fn session() -> &'static str {
-    if crate::osutil::multi() { "Blink-Kernel-Process-Multi" } else { SESSION }
+    if crate::osutil::multi() { "Hayate-Kernel-Process-Multi" } else { SESSION }
 }
 const PROVIDER: GUID = GUID::from_u128(0x22fb2cd6_0e7b_422b_a0c7_2fad1fd0e716);
 const KEYWORD_PROCESS: u64 = 0x10;
@@ -205,7 +205,7 @@ fn start_etw() -> Result<(), String> {
         let mut h = CONTROLTRACE_HANDLE::default();
         let r = StartTraceW(&mut h, PCWSTR(p.name.as_ptr()), pp);
         if r != ERROR_SUCCESS {
-            // 183 = a session left by an elevated Blink that we may not stop unelevated
+            // 183 = a session left by an elevated Hayate that we may not stop unelevated
             let why = match r.0 {
                 5 => "needs admin",
                 183 => "session busy; needs admin",
@@ -233,7 +233,7 @@ fn start_etw() -> Result<(), String> {
         }
         let thv = th.Value;
         std::thread::Builder::new()
-            .name("blink-etw".into())
+            .name("hayate-etw".into())
             .stack_size(128 * 1024)
             .spawn(move || {
                 let _keep = name;
@@ -425,14 +425,14 @@ fn start_snapshot() {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return;
     }
-    let _ = std::thread::Builder::new().name("blink-procpoll".into()).stack_size(128 * 1024).spawn(|| {
+    let _ = std::thread::Builder::new().name("hayate-procpoll".into()).stack_size(128 * 1024).spawn(|| {
         let (mut prev, mut cur) = (List::default(), List::default());
         prev.refresh();
-        // BLINK_TIMING: cycles per poll (list+diff, events), logged every 30 polls
+        // HAYATE_TIMING: cycles per poll (list+diff, events), logged every 30 polls
         let timing = crate::timing::detail();
         let (mut polls, mut c_list, mut c_ev, mut n_ev) = (0u64, 0u64, 0u64, 0usize);
         while !st().stopping.load(Ordering::SeqCst) {
-            // the fallback polls every 2 s; only elevated Blink gets exact ETW events
+            // the fallback polls every 2 s; only elevated Hayate gets exact ETW events
             std::thread::sleep(Duration::from_secs(2));
             let c0 = if timing { crate::timing::thread_cycles() } else { 0 };
             if !cur.refresh() {

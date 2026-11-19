@@ -1,4 +1,4 @@
-//! Pure parts of the opt-in "Open Blink instead of Task Manager" feature
+//! Pure parts of the opt-in "Open Hayate instead of Task Manager" feature
 //! (IFEO `Debugger` redirect, docs/task-manager-replacement.md §7): which keys
 //! may be written, the enable / disable / status state machine, the launcher's
 //! decision, the ACL policy for the launcher file. No I/O: the registry and the
@@ -7,18 +7,21 @@
 
 /// The one real image this feature redirects.
 pub const REAL_TARGET: &str = "taskmgr.exe";
-/// Staging targets: images that are not a system component. Test machine only.
-pub const SURROGATE_PREFIX: &str = "blink-surrogate-";
+/// Staging targets: images that are not a system component. Rig only.
+pub const SURROGATE_PREFIX: &str = "hayate-surrogate-";
 pub const IFEO_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
 /// Machine state written beside the redirect: `<STATE_KEY>\<target>`.
-pub const STATE_KEY: &str = r"SOFTWARE\Blink\TaskManager";
-pub const LAUNCHER_NAME: &str = "blink-tm.exe";
+pub const STATE_KEY: &str = r"SOFTWARE\Hayate\TaskManager";
+pub const LAUNCHER_NAME: &str = "hayate-tm.exe";
+/// The launcher of the pre-rename build, in the pre-rename Program Files folder.
+/// It is ours only in its exact quoted form there (see `disable_legacy`).
+pub const LEGACY_LAUNCHER_NAME: &str = "blink-tm.exe";
 pub const SCHEMA: &str = "1";
 /// Marker argument: the enable-time probe asks the launcher for a dry run.
-pub const SELF_TEST_ARG: &str = "--blink-self-test";
+pub const SELF_TEST_ARG: &str = "--hayate-self-test";
 /// Set in the environment of the native Task Manager the launcher starts: a
 /// launcher that finds it already set is in a loop and starts nothing.
-pub const GUARD_ENV: &str = "BLINK_TM_LAUNCHED";
+pub const GUARD_ENV: &str = "TM_LAUNCHED";
 
 pub const DEBUG_PROCESS: u32 = 0x1;
 pub const DEBUG_ONLY_THIS_PROCESS: u32 = 0x2;
@@ -77,7 +80,7 @@ pub fn norm(p: &str) -> String {
 pub fn expected_launcher(program_files: &str) -> Option<String> {
     let pf = program_files.trim().trim_end_matches('\\');
     let b = pf.as_bytes();
-    (b.len() >= 3 && b[1] == b':' && b[2] == b'\\').then(|| format!(r"{pf}\Blink\{LAUNCHER_NAME}"))
+    (b.len() >= 3 && b[1] == b':' && b[2] == b'\\').then(|| format!(r"{pf}\Hayate\{LAUNCHER_NAME}"))
 }
 
 /// The `Debugger` string: the quoted launcher path, nothing else.
@@ -89,14 +92,14 @@ pub fn is_ours(value: &str, launcher: &str) -> bool {
     norm(value) == norm(launcher) && value.trim().starts_with('"') && value.trim().ends_with('"')
 }
 
-/// Ours = the quoted launcher path Blink would write today, or the launcher
+/// Ours = the quoted launcher path Hayate would write today, or the launcher
 /// path recorded in our own admin-owned state at enable time (a Program Files
 /// move or a different install root must never turn our own value Foreign).
-/// The recorded path must be `%ProgramFiles%\Blink\blink-tm.exe` (== `launcher`,
-/// the only place Blink ever installs it); a state that records anything else is
+/// The recorded path must be `%ProgramFiles%\Hayate\hayate-tm.exe` (== `launcher`,
+/// the only place Hayate ever installs it); a state that records anything else is
 /// untrusted and never makes a value "ours" or a file deletable.
 pub fn recorded_launcher_ok(recorded: &str, launcher: &str) -> bool {
-    !recorded.trim().is_empty() && norm(recorded) == norm(launcher) && norm(crate_file_name(recorded)) == LAUNCHER_NAME && !recorded.contains("..")
+    !recorded.trim().is_empty() && norm(recorded) == norm(launcher) && norm(crate_file_name(recorded)) == norm(crate_file_name(launcher)) && !recorded.contains("..")
 }
 
 pub fn is_ours_any(value: &str, launcher: &str, state: Option<&State>) -> bool {
@@ -113,7 +116,7 @@ pub fn state_usable(host: &dyn Host, state: Option<&State>, launcher: &str) -> R
     }
 }
 
-/// `--target-path` and staging targets exist for debug builds only (test machine runs).
+/// `--target-path` and staging targets exist for debug builds only (rig tests).
 /// A release build only ever redirects `taskmgr.exe` -> the Program Files launcher.
 pub fn helper_args_allowed(target: &str, image: Option<&str>, debug_build: bool) -> bool {
     debug_build || (is_real(target) && image.is_none())
@@ -171,11 +174,11 @@ pub trait Host {
     /// deleted: it is renamed away (and removed at reboot) when possible; false = still there
     /// (the next switch-off / uninstall removes it).
     fn remove_launcher(&mut self, path: &str) -> bool;
-    /// HKLM\SOFTWARE\Blink and \TaskManager (when they exist) can be changed by admins only
+    /// HKLM\SOFTWARE\Hayate and \TaskManager (when they exist) can be changed by admins only
     fn state_trusted(&self) -> Result<(), String>;
     /// is a launcher file at `path` right now
     fn launcher_exists(&self, path: &str) -> bool;
-    /// is there a rollback copy (`blink-tm.old.exe`) beside `path`
+    /// is there a rollback copy (`hayate-tm.old.exe`) beside `path`
     fn old_exists(&self, path: &str) -> bool;
     /// build ordinal of the image the helper runs from (a newer build has a larger number)
     fn source_ordinal(&self) -> u64;
@@ -183,7 +186,7 @@ pub trait Host {
     fn probe(&mut self, target: &str, native: Option<&str>) -> Result<(), String>;
 
     // ---- launcher refresh (docs §7.5 "Launcher update") ----
-    /// Take the cold-start lock (`.coldstart.lock`): a launcher that is cold-starting a Blink holds it.
+    /// Take the cold-start lock (`.coldstart.lock`): a launcher that is cold-starting a Hayate holds it.
     /// Err = held (or unusable): nothing may be swapped now.
     fn lock_cold_start(&mut self) -> Result<(), String>;
     fn unlock_cold_start(&mut self);
@@ -191,14 +194,14 @@ pub trait Host {
     fn source_sha(&self) -> Result<String, String>;
     /// sha256 of the launcher file at `path`
     fn launcher_sha(&self, path: &str) -> Result<String, String>;
-    /// Copy the source image beside `path` (`blink-tm.new.exe`) and prove by sha256 that the copy is
+    /// Copy the source image beside `path` (`hayate-tm.new.exe`) and prove by sha256 that the copy is
     /// `sha`. Err = nothing left behind, the launcher untouched.
     fn stage_launcher(&mut self, path: &str, sha: &str) -> Result<(), String>;
-    /// Keep the launcher as `blink-tm.old.exe` and put the staged copy in its place (`swap_files`: the
+    /// Keep the launcher as `hayate-tm.old.exe` and put the staged copy in its place (`swap_files`: the
     /// file at `path` never goes missing, except for a running image). Err = the old launcher is at
     /// `path` (the caller checks `launcher_exists`).
     fn swap_launcher(&mut self, path: &str) -> Result<(), String>;
-    /// Put a copy of `blink-tm.old.exe` at `path` in one replace (`restore_files`). Err = not restored.
+    /// Put a copy of `hayate-tm.old.exe` at `path` in one replace (`restore_files`). Err = not restored.
     fn restore_launcher(&mut self, path: &str) -> Result<(), String>;
 }
 
@@ -267,7 +270,7 @@ impl std::fmt::Display for Fail {
 /// its literal backslash (a backslash-t in a normal literal is a tab).
 pub const RECOVERY_HINT: &str = r"Stuck? As administrator: reg delete the Debugger value of IFEO\taskmgr.exe (exact line: docs/task-manager-replacement.md)";
 
-/// Text for a helper exit code (the unelevated Blink only sees the code).
+/// Text for a helper exit code (the unelevated Hayate only sees the code).
 pub fn exit_message(code: i32) -> String {
     match code {
         EXIT_OK => "done".into(),
@@ -290,7 +293,7 @@ pub fn exit_message(code: i32) -> String {
 pub struct State {
     pub enabled: bool,
     pub launcher: String,
-    pub blink_path: String,
+    pub hayate_path: String,
     pub native_path: Option<String>,
     pub schema: Option<String>,
     pub prev_existed: Option<String>,
@@ -302,7 +305,7 @@ pub fn read_state(reg: &dyn Registry, target: &str) -> Option<State> {
     let k = state_key(target);
     let g = |n: &str| reg.get(&k, n).ok().flatten();
     let launcher = g("LauncherPath")?;
-    Some(State { enabled: g("Enabled").as_deref() == Some("1"), launcher, blink_path: g("BlinkPath").unwrap_or_default(), native_path: g("NativePath"), schema: g("SchemaVersion"), prev_existed: g("PreviousDebuggerExisted"), build: g("BuildOrdinal").and_then(|b| b.trim().parse().ok()) })
+    Some(State { enabled: g("Enabled").as_deref() == Some("1"), launcher, hayate_path: g("HayatePath").unwrap_or_default(), native_path: g("NativePath"), schema: g("SchemaVersion"), prev_existed: g("PreviousDebuggerExisted"), build: g("BuildOrdinal").and_then(|b| b.trim().parse().ok()) })
 }
 
 fn put(reg: &mut dyn Registry, key: &str, name: &str, v: &str) -> Result<(), Fail> {
@@ -313,7 +316,7 @@ fn put(reg: &mut dyn Registry, key: &str, name: &str, v: &str) -> Result<(), Fai
 /// written -> probe -> Enabled=1. Any failure before the end restores the
 /// previous registry exactly (a foreign value is refused up front, so
 /// "previous" is always "no Debugger value").
-pub fn enable(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program_files: &str, blink_path: &str, native: Option<&str>) -> Result<Outcome, Fail> {
+pub fn enable(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program_files: &str, hayate_path: &str, native: Option<&str>) -> Result<Outcome, Fail> {
     let target = valid_target(target).ok_or(Fail::BadTarget)?;
     let launcher = expected_launcher(program_files).ok_or_else(|| Fail::Refused("Program Files folder unknown".into()))?;
     match (is_real(&target), native) {
@@ -350,7 +353,7 @@ pub fn enable(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program
         put(reg, &sk, "SchemaVersion", SCHEMA)?;
         put(reg, &sk, "Enabled", "0")?;
         put(reg, &sk, "LauncherPath", &launcher)?;
-        put(reg, &sk, "BlinkPath", blink_path)?;
+        put(reg, &sk, "HayatePath", hayate_path)?;
         put(reg, &sk, "PreviousDebuggerExisted", if prev.is_some() { "1" } else { "0" })?;
         put(reg, &sk, "BuildOrdinal", &host.source_ordinal().to_string())?;
         if let Some(n) = native {
@@ -389,7 +392,7 @@ pub fn enable(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program
                     ("SchemaVersion", o.schema.as_deref()),
                     ("Enabled", Some(if o.enabled { "1" } else { "0" })),
                     ("LauncherPath", Some(o.launcher.as_str())),
-                    ("BlinkPath", Some(o.blink_path.as_str())),
+                    ("HayatePath", Some(o.hayate_path.as_str())),
                     ("PreviousDebuggerExisted", o.prev_existed.as_deref()),
                     ("NativePath", o.native_path.as_deref()),
                 ];
@@ -444,14 +447,80 @@ fn drop_empty_ifeo(reg: &mut dyn Registry, ik: &str) {
 pub fn disable(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program_files: &str) -> Result<Outcome, Fail> {
     let target = valid_target(target).ok_or(Fail::BadTarget)?;
     let launcher = expected_launcher(program_files).ok_or_else(|| Fail::Refused("Program Files folder unknown".into()))?;
+    disable_at(reg, host, &target, &launcher)
+}
+
+/// The launcher path the pre-rename build installed: `<ProgramFiles>\Blink\blink-tm.exe`.
+pub fn legacy_expected_launcher(program_files: &str) -> Option<String> {
+    let pf = program_files.trim().trim_end_matches('\\');
+    let b = pf.as_bytes();
+    (b.len() >= 3 && b[1] == b':' && b[2] == b'\\').then(|| format!(r"{pf}\Blink\{LEGACY_LAUNCHER_NAME}"))
+}
+
+/// A `Debugger` value that names our legacy launcher in any other form than
+/// the exact quoted one: never guessed at, never deleted.
+pub fn mentions_legacy(value: &str) -> bool {
+    let v = value.to_ascii_lowercase().replace('/', "\\");
+    v.contains("blink-tm.exe") || v.contains(r"\blink\")
+}
+
+/// What a Hayate uninstall does about a redirect installed by the pre-rename
+/// build. Same rule as the current one: only the exact quoted launcher in
+/// `<ProgramFiles>\Blink` is ours; any other form that mentions it aborts.
+pub fn legacy_uninstall_step(reg: &dyn Registry, program_files: &str) -> UninstallStep {
+    let Some(launcher) = legacy_expected_launcher(program_files) else { return UninstallStep::Nothing };
+    match reg.get(&ifeo_key(REAL_TARGET), "Debugger") {
+        Ok(Some(v)) if is_ours(&v, &launcher) => UninstallStep::TurnOff,
+        Ok(Some(v)) if mentions_legacy(&v) => UninstallStep::Refuse(format!(
+            "The Task Manager setting in Windows ({v}) points at the pre-rename Hayate launcher but is not exactly Hayate's own entry, so Hayate will not guess. Nothing was removed. Delete that value as administrator: reg delete \"HKLM\\{}\" /v Debugger /f",
+            ifeo_key(REAL_TARGET)
+        )),
+        _ => UninstallStep::Nothing,
+    }
+}
+
+/// Turn off a redirect installed by the pre-rename build (`blink-tm.exe` in
+/// `<ProgramFiles>\Blink`) and remove its launcher. Only that exact quoted path
+/// counts as ours; anything else that mentions it is refused, so a working
+/// Task Manager is never deleted under an unknown value.
+pub fn disable_legacy(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program_files: &str) -> Result<Outcome, Fail> {
+    let target = valid_target(target).ok_or(Fail::BadTarget)?;
+    let launcher = legacy_expected_launcher(program_files).ok_or_else(|| Fail::Refused("Program Files folder unknown".into()))?;
     let (ik, sk) = (ifeo_key(&target), state_key(&target));
     let cur = reg.get(&ik, "Debugger").map_err(Fail::Registry)?;
     let state = read_state(reg, &target);
+    let outcome = match &cur {
+        Some(v) if is_ours(v, &launcher) => {
+            reg.delete_value(&ik, "Debugger").map_err(Fail::Registry)?;
+            drop_empty_ifeo(reg, &ik);
+            Outcome::Disabled
+        }
+        Some(v) if mentions_legacy(v) => return Err(Fail::Foreign(v.clone())),
+        Some(_) => Outcome::ForeignKept,
+        None if state.is_some() => Outcome::Disabled,
+        None => Outcome::AlreadyOff,
+    };
+    // the state entry of the legacy build (renamed key) goes only when it names
+    // the legacy launcher: another target's state is not this step's business
+    if state.as_ref().is_some_and(|s| norm(&s.launcher) == norm(&launcher)) {
+        reg.delete_key(&sk).map_err(Fail::Registry)?;
+    }
+    if outcome == Outcome::Disabled && reg.subkeys(STATE_KEY).is_empty() {
+        let _ = reg.delete_key(STATE_KEY);
+        host.remove_launcher(&launcher);
+    }
+    Ok(outcome)
+}
+
+fn disable_at(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, launcher: &str) -> Result<Outcome, Fail> {
+    let (ik, sk) = (ifeo_key(target), state_key(target));
+    let cur = reg.get(&ik, "Debugger").map_err(Fail::Registry)?;
+    let state = read_state(reg, target);
     // a state that anyone could have edited decides nothing: refuse, change nothing
-    state_usable(host, state.as_ref(), &launcher).map_err(Fail::Untrusted)?;
+    state_usable(host, state.as_ref(), launcher).map_err(Fail::Untrusted)?;
     let had_state = state.is_some();
     let outcome = match &cur {
-        Some(v) if is_ours_any(v, &launcher, state.as_ref()) => {
+        Some(v) if is_ours_any(v, launcher, state.as_ref()) => {
             reg.delete_value(&ik, "Debugger").map_err(Fail::Registry)?;
             drop_empty_ifeo(reg, &ik);
             Outcome::Disabled
@@ -466,7 +535,7 @@ pub fn disable(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, progra
     }
     if reg.subkeys(STATE_KEY).is_empty() {
         let _ = reg.delete_key(STATE_KEY);
-        host.remove_launcher(&launcher);
+        host.remove_launcher(launcher);
     }
     Ok(outcome)
 }
@@ -491,22 +560,22 @@ pub fn disable_all(reg: &mut dyn Registry, host: &mut dyn Host, program_files: &
 
 // ---- launcher refresh (docs/task-manager-replacement.md §7.5 "Launcher update") ----------------
 
-/// How the launcher file compares with the Blink that is running.
+/// How the launcher file compares with the Hayate that is running.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Fresh {
     /// same sha256
     Current,
-    /// a different build and this Blink is the newer one (or the order is unknown): refresh is offered
+    /// a different build and this Hayate is the newer one (or the order is unknown): refresh is offered
     Stale,
-    /// a different build, but this Blink is NOT newer than the launcher (a rolled-back Blink): never a downgrade
+    /// a different build, but this Hayate is NOT newer than the launcher (a rolled-back Hayate): never a downgrade
     NotNewer,
     /// a hash could not be read: nothing is offered
     Unknown,
 }
 
 /// `*_build`: build ordinals (larger = newer). Equal hashes are current; otherwise the refresh is
-/// offered only when this Blink is newer than the launcher. A launcher without a recorded ordinal
-/// (enabled by an older Blink) counts as older; an unknown running ordinal (the cold-started
+/// offered only when this Hayate is newer than the launcher. A launcher without a recorded ordinal
+/// (enabled by an older Hayate) counts as older; an unknown running ordinal (the cold-started
 /// launcher comparing with the installed exe) decides by the hashes alone.
 pub fn freshness(launcher_sha: Option<&str>, running_sha: Option<&str>, launcher_build: Option<u64>, running_build: Option<u64>) -> Fresh {
     match (launcher_sha.map(str::trim), running_sha.map(str::trim)) {
@@ -524,19 +593,19 @@ pub fn freshness(launcher_sha: Option<&str>, running_sha: Option<&str>, launcher
 }
 
 /// Settings offers "Refresh launcher" only for a redirect that is `On`, a launcher that differs from
-/// this Blink, an installed Blink that is not itself the launcher image (a cold-started Blink IS the
+/// this Hayate, an installed Hayate that is not itself the launcher image (a cold-started Hayate IS the
 /// launcher: it never refreshes itself) and not while a helper run is under way.
 pub fn refresh_offer(status: &Status, fresh: &Fresh, allowed: bool, is_launcher_image: bool, busy: bool) -> bool {
     allowed && !is_launcher_image && !busy && *status == Status::On && *fresh == Fresh::Stale
 }
 
-/// Key of one (launcher, running Blink) pair: an automatic refresh is tried once per pair.
+/// Key of one (launcher, running Hayate) pair: an automatic refresh is tried once per pair.
 pub fn pair_key(launcher_sha: &str, running_sha: &str) -> String {
     let short = |s: &str| s.trim().to_ascii_lowercase().chars().take(16).collect::<String>();
     format!("{}:{}", short(launcher_sha), short(running_sha))
 }
 
-/// An elevated Blink may refresh the launcher by itself at start (no second UAC prompt: the user
+/// An elevated Hayate may refresh the launcher by itself at start (no second UAC prompt: the user
 /// already consented to elevation): only when the Settings offer would be there, this pair was not tried
 /// yet, or an elevated self-update just finished (`forced`: that update is the reason the pair differs).
 /// Settings offers "Repair launcher": our value is on, the launcher file is gone (a swap that was cut
@@ -545,7 +614,7 @@ pub fn repair_offer(status: &Status, state_enabled: bool, launcher_exists: bool,
     allowed && !is_launcher_image && !busy && state_enabled && matches!(status, Status::Stale(_)) && !launcher_exists && old_exists
 }
 
-/// Text the elevated helper leaves for the asking Blink: no control characters (a registry value is
+/// Text the elevated helper leaves for the asking Hayate: no control characters (a registry value is
 /// user-visible text, not markup), one line, at most 400 characters.
 pub fn clean_text(t: &str) -> String {
     let one: String = t.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
@@ -560,7 +629,7 @@ pub fn auto_refresh_due(offer: bool, elevated: bool, tried_pair: Option<&str>, p
 pub enum Refreshed {
     /// the launcher is the helper's own image already: nothing was touched
     Current,
-    /// swapped, verified, probed; the previous file is kept as `blink-tm.old.exe`
+    /// swapped, verified, probed; the previous file is kept as `hayate-tm.old.exe`
     Done,
     /// the launcher file was missing (a cut-short swap): the previous copy was put back and probed
     Repaired,
@@ -597,7 +666,7 @@ pub fn swap_files(fs: &mut dyn Fs, path: &str, new: &str, old: &str) -> Result<(
     }
     if fs.exists(old) && fs.remove(old).is_err() && fs.exists(old) {
         let _ = fs.remove(new);
-        return Err("the previous copy blink-tm.old.exe is still running; close the Hayate that Task Manager started and try again".into());
+        return Err("the previous copy hayate-tm.old.exe is still running; close the Hayate that Task Manager started and try again".into());
     }
     if !fs.exists(path) {
         return fs.rename(new, path).map_err(|e| {
@@ -636,7 +705,7 @@ pub fn swap_files(fs: &mut dyn Fs, path: &str, new: &str, old: &str) -> Result<(
 /// Put a copy of `old` at `path` (via the staged name `new`) in one replace: `path` is never removed first.
 pub fn restore_files(fs: &mut dyn Fs, path: &str, new: &str, old: &str) -> Result<(), String> {
     if !fs.exists(old) {
-        return Err("there is no previous launcher copy (blink-tm.old.exe) to put back".into());
+        return Err("there is no previous launcher copy (hayate-tm.old.exe) to put back".into());
     }
     let _ = fs.remove(new);
     fs.copy(old, new).map_err(|e| {
@@ -666,11 +735,11 @@ enum Step {
 /// Replace the launcher file with the helper's own image. Order: state and value checked (untrusted
 /// state refuses, nothing changes) -> cold-start lock taken (a cold start in progress = `Busy`) ->
 /// hashes compared -> the build must be newer -> staged copy beside the target, hash-checked -> swap
-/// keeping `blink-tm.old.exe` -> trust check + probe + the file at the launcher path is the staged
+/// keeping `hayate-tm.old.exe` -> trust check + probe + the file at the launcher path is the staged
 /// image. A failed check puts the old file back and probes again; when even that fails the `Debugger`
 /// value is removed (`disable`) so it never points at a missing or broken file. A launcher file that
-/// is MISSING (a cut-short swap) is put back from `blink-tm.old.exe` the same way (repair).
-pub fn refresh(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program_files: &str, blink_path: &str) -> Result<Refreshed, Fail> {
+/// is MISSING (a cut-short swap) is put back from `hayate-tm.old.exe` the same way (repair).
+pub fn refresh(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, program_files: &str, hayate_path: &str) -> Result<Refreshed, Fail> {
     let target = valid_target(target).ok_or(Fail::BadTarget)?;
     let launcher = expected_launcher(program_files).ok_or_else(|| Fail::Refused("Program Files folder unknown".into()))?;
     let (ik, sk) = (ifeo_key(&target), state_key(&target));
@@ -693,9 +762,9 @@ pub fn refresh(reg: &mut dyn Registry, host: &mut dyn Host, target: &str, progra
             if alive && done == Refreshed::Done {
                 // the launcher is the newer build now (a missing record counts as older)
                 let _ = reg.set(&sk, "BuildOrdinal", &host.source_ordinal().to_string());
-                // a Blink that moved (per-user -> all users) is the one the launcher messages next
-                if !blink_path.trim().is_empty() && norm(blink_path) != norm(&state.blink_path) {
-                    let _ = reg.set(&sk, "BlinkPath", blink_path);
+                // a Hayate that moved (per-user -> all users) is the one the launcher messages next
+                if !hayate_path.trim().is_empty() && norm(hayate_path) != norm(&state.hayate_path) {
+                    let _ = reg.set(&sk, "HayatePath", hayate_path);
                 }
             }
             Ok(done)
@@ -755,7 +824,7 @@ fn swap_checked(host: &mut dyn Host, target: &str, launcher: &str, native: Optio
     if cur.trim().eq_ignore_ascii_case(src.trim()) {
         return Ok(Refreshed::Current);
     }
-    // never a downgrade: a rolled-back Blink leaves a newer launcher alone
+    // never a downgrade: a rolled-back Hayate leaves a newer launcher alone
     if build.is_some_and(|l| host.source_ordinal() <= l) {
         return Err(fail(Fail::Refused("This Hayate is not newer than the Task Manager launcher; nothing was changed".into())));
     }
@@ -832,21 +901,21 @@ fn off_status(host: &dyn Host, launcher: &str) -> Status {
     }
 }
 
-/// What a Blink uninstall must do first.
+/// What a Hayate uninstall must do first.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UninstallStep {
     Nothing,
     /// turn the redirect off (UAC) before anything is deleted
     TurnOff,
-    /// a `Debugger` value that mentions our launcher but is not exactly our entry: Blink will not guess
+    /// a `Debugger` value that mentions our launcher but is not exactly our entry: Hayate will not guess
     /// (deleting the launcher could leave no Task Manager); nothing may be removed
     Refuse(String),
 }
 
-/// A foreign `Debugger` that still names our launcher (`blink-tm.exe`, or any `\Blink\` folder).
+/// A foreign `Debugger` that still names our launcher (`hayate-tm.exe`, or any `\Hayate\` folder).
 pub fn mentions_us(value: &str) -> bool {
     let v = value.to_ascii_lowercase().replace('/', "\\");
-    v.contains("blink-tm.exe") || v.contains(r"\blink\")
+    v.contains("hayate-tm.exe") || v.contains(r"\hayate\")
 }
 
 pub fn uninstall_step(s: &Status) -> UninstallStep {
@@ -859,7 +928,7 @@ pub fn uninstall_step(s: &Status) -> UninstallStep {
     }
 }
 
-/// What the uninstall gate does with `step`. `user_exe`: this Blink runs from the per-user folder, which
+/// What the uninstall gate does with `step`. `user_exe`: this Hayate runs from the per-user folder, which
 /// the user (and anything running as them) can write: it must never be started as administrator.
 #[derive(Debug, PartialEq)]
 pub enum GatePlan {
@@ -938,7 +1007,7 @@ pub enum Plan {
     Abort,
     SelfTest,
     Native(Why),
-    /// message the running Blink; native Task Manager when that fails
+    /// message the running Hayate; native Task Manager when that fails
     Show,
 }
 
@@ -965,24 +1034,24 @@ pub fn target_from_args(args: &[String]) -> String {
     args.first().and_then(|a| valid_target(crate_file_name(a.trim_matches('"')))).unwrap_or_else(|| REAL_TARGET.to_string())
 }
 
-/// May the launcher message this window? Only the Blink recorded at enable time, or
-/// the launcher's own image (a Blink the launcher cold-started, see `launch`).
-pub fn blink_window_ok(window_image: &str, recorded: &str, launcher: &str) -> bool {
+/// May the launcher message this window? Only the Hayate recorded at enable time, or
+/// the launcher's own image (a Hayate the launcher cold-started, see `launch`).
+pub fn hayate_window_ok(window_image: &str, recorded: &str, launcher: &str) -> bool {
     let w = norm(window_image);
     [recorded, launcher].iter().any(|k| !k.trim().is_empty() && norm(k) == w)
 }
 
 // ---- cold start (docs/task-manager-replacement.md §7.3) ---------------------------------
 
-/// How long a cold-started Blink has to show its window before the launcher gives up.
+/// How long a cold-started Hayate has to show its window before the launcher gives up.
 pub const COLD_WAIT_MS: u32 = 3000;
 
-/// What the launcher finds when it looks for a Blink window.
+/// What the launcher finds when it looks for a Hayate window.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Seen {
     /// answered within the budget and was shown in front
     Shown,
-    /// a window of ours exists and does not answer (a second Blink cannot start next to it)
+    /// a window of ours exists and does not answer (a second Hayate cannot start next to it)
     Hung,
     Absent,
 }
@@ -999,15 +1068,15 @@ pub enum NativeWhy {
     NoWindow,
     /// the launcher is not on the interactive desktop (Ctrl+Alt+Del / UAC / lock screen)
     SecureDesktop,
-    /// another launcher may be cold-starting a Blink: the lock wait timed out
+    /// another launcher may be cold-starting a Hayate: the lock wait timed out
     Busy,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Via {
-    /// a running Blink was shown
+    /// a running Hayate was shown
     Shown,
-    /// no Blink was running: the launcher started its own protected image and its window appeared
+    /// no Hayate was running: the launcher started its own protected image and its window appeared
     ColdStarted,
     Native(NativeWhy),
 }
@@ -1027,21 +1096,21 @@ pub trait LaunchHost {
     fn lock_held(&self) -> bool;
     /// elevated and the launcher file + every folder above it admin-only
     fn trusted(&self) -> Result<(), String>;
-    /// look for a Blink window (recorded Blink or the launcher's own image), message it
+    /// look for a Hayate window (recorded Hayate or the launcher's own image), message it
     fn show_running(&mut self) -> Seen;
-    /// Re-verify the launcher file and start it as a normal Blink with a clean command line
+    /// Re-verify the launcher file and start it as a normal Hayate with a clean command line
     /// and environment. Never from any path but the verified launcher.
-    fn start_blink(&mut self) -> Result<(), String>;
-    /// poll for the started Blink's window for up to `ms`; true once it was shown
+    fn start_hayate(&mut self) -> Result<(), String>;
+    /// poll for the started Hayate's window for up to `ms`; true once it was shown
     fn wait_window(&mut self, ms: u32) -> bool;
-    /// end the process `start_blink` made (its window never came)
+    /// end the process `start_hayate` made (its window never came)
     fn stop_started(&mut self);
     fn start_native(&mut self) -> bool;
 }
 
 /// The launcher's whole decision after `plan`. Order matters: trust first (an untrusted
-/// launcher neither messages nor starts anything), then a running Blink, and only a
-/// Blink that is *absent* is cold-started; a hung one cannot be (the single-instance check
+/// launcher neither messages nor starts anything), then a running Hayate, and only a
+/// Hayate that is *absent* is cold-started; a hung one cannot be (the single-instance check
 /// would hand over to it), and the native Task Manager is the answer to every failure.
 pub fn launch(plan: &Plan, h: &mut dyn LaunchHost) -> Done {
     fn native(h: &mut dyn LaunchHost, why: NativeWhy) -> Done {
@@ -1064,7 +1133,7 @@ pub fn launch(plan: &Plan, h: &mut dyn LaunchHost) -> Done {
                 Seen::Hung => return native(h, NativeWhy::Hung),
                 Seen::Absent => {}
             }
-            // never start a second Blink while another launcher may be starting one: the lock
+            // never start a second Hayate while another launcher may be starting one: the lock
             // wait timed out, so look once more and otherwise leave it to the native Task Manager
             if !h.lock_held() {
                 return match h.show_running() {
@@ -1072,7 +1141,7 @@ pub fn launch(plan: &Plan, h: &mut dyn LaunchHost) -> Done {
                     _ => native(h, NativeWhy::Busy),
                 };
             }
-            if h.start_blink().is_err() {
+            if h.start_hayate().is_err() {
                 return native(h, NativeWhy::StartFailed);
             }
             if h.wait_window(COLD_WAIT_MS) {
@@ -1100,12 +1169,12 @@ pub fn cold_child(parent_image: Option<&str>, own_exe: &str) -> bool {
     parent_image.is_some_and(|p| !p.trim().is_empty() && norm(p) == norm(own_exe))
 }
 
-/// Caller variables a cold-started Blink may keep: none of them names a path, a program or
+/// Caller variables a cold-started Hayate may keep: none of them names a path, a program or
 /// a library to load (they are hardware / account labels). Everything else the caller set
 /// is dropped (`ProgramFiles`, `PATH`, `COMSPEC`, `PSModulePath`, `_NT_SYMBOL_PATH`, `JAVA_TOOL_OPTIONS`, ...).
 pub const PASS_THROUGH: &[&str] = &["NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "OS", "USERNAME", "COMPUTERNAME", "USERDOMAIN"];
 
-/// Folders of the cold-started Blink's environment: known folders and the Windows folder,
+/// Folders of the cold-started Hayate's environment: known folders and the Windows folder,
 /// never the environment the caller handed the elevated launcher.
 pub struct SystemFolders<'a> {
     pub local: &'a str,
@@ -1145,9 +1214,9 @@ pub fn system_vars(f: &SystemFolders) -> Vec<(String, String)> {
     ]
 }
 
-/// The environment of the cold-started Blink: a WHITELIST. The system's variables
+/// The environment of the cold-started Hayate: a WHITELIST. The system's variables
 /// (`system_vars`) plus the harmless `PASS_THROUGH` ones of the caller. Every other variable
-/// is dropped (`BLINK_*` included): the caller's environment is the medium user's to write
+/// is dropped (`HAYATE_*` included): the caller's environment is the medium user's to write
 /// (HKCU\Environment) and the process is elevated.
 pub fn child_env(parent: &[(String, String)], system: &[(String, String)]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = parent
@@ -1159,8 +1228,8 @@ pub fn child_env(parent: &[(String, String)], system: &[(String, String)]) -> Ve
     out
 }
 
-/// The launcher may look for / start a Blink only on the interactive desktop. On the
-/// Winlogon (secure) desktop (Ctrl+Alt+Del, UAC, lock screen) no Blink window is ever
+/// The launcher may look for / start a Hayate only on the interactive desktop. On the
+/// Winlogon (secure) desktop (Ctrl+Alt+Del, UAC, lock screen) no Hayate window is ever
 /// found, and a started one would be invisible and elevated.
 pub fn interactive_desktop(name: &str) -> bool {
     name.eq_ignore_ascii_case("Default")
@@ -1285,8 +1354,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     const PF: &str = r"C:\Program Files";
-    const LAUNCHER: &str = r"C:\Program Files\Blink\blink-tm.exe";
-    const BLINK: &str = r"C:\Users\u\AppData\Local\Programs\Blink\blink.exe";
+    const LAUNCHER: &str = r"C:\Program Files\Hayate\hayate-tm.exe";
+    const HAYATE: &str = r"C:\Users\u\AppData\Local\Programs\Hayate\hayate.exe";
 
     #[derive(Default)]
     struct Mem {
@@ -1489,11 +1558,11 @@ mod tests {
         }
     }
 
-    const SUR: &str = "blink-surrogate-tm.exe";
-    const SUR_IMG: &str = r"C:\stage\blink-surrogate-tm.exe";
+    const SUR: &str = "hayate-surrogate-tm.exe";
+    const SUR_IMG: &str = r"C:\rig\hayate-surrogate-tm.exe";
 
     fn on(reg: &mut Mem, host: &mut Fake) {
-        assert_eq!(enable(reg, host, SUR, PF, BLINK, Some(SUR_IMG)), Ok(Outcome::Enabled));
+        assert_eq!(enable(reg, host, SUR, PF, HAYATE, Some(SUR_IMG)), Ok(Outcome::Enabled));
     }
 
     #[test]
@@ -1503,7 +1572,7 @@ mod tests {
         let ik = ifeo_key(SUR);
         assert_eq!(r.get(&ik, "Debugger").unwrap().as_deref(), Some(format!("\"{LAUNCHER}\"").as_str()));
         let s = read_state(&r, SUR).unwrap();
-        assert!(s.enabled && s.launcher == LAUNCHER && s.blink_path == BLINK && s.native_path.as_deref() == Some(SUR_IMG));
+        assert!(s.enabled && s.launcher == LAUNCHER && s.hayate_path == HAYATE && s.native_path.as_deref() == Some(SUR_IMG));
         assert!(h.installed);
         // write order: state Enabled=0, then the Debugger, then Enabled=1 last
         let pos = |needle: &str| r.log.iter().position(|l| l.contains(needle)).unwrap();
@@ -1512,7 +1581,7 @@ mod tests {
         assert_eq!(r.log.last().unwrap(), &format!("set {sk}|Enabled=1"));
         // enabling again changes nothing
         let n = r.log.len();
-        assert_eq!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Ok(Outcome::AlreadyOn));
+        assert_eq!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Ok(Outcome::AlreadyOn));
         assert_eq!(r.log.len(), n);
     }
 
@@ -1534,10 +1603,10 @@ mod tests {
     fn launcher_stays_while_another_target_needs_it() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         on(&mut r, &mut h);
-        assert_eq!(enable(&mut r, &mut h, "blink-surrogate-b.exe", PF, BLINK, Some(r"C:\stage\blink-surrogate-b.exe")), Ok(Outcome::Enabled));
+        assert_eq!(enable(&mut r, &mut h, "hayate-surrogate-b.exe", PF, HAYATE, Some(r"C:\rig\hayate-surrogate-b.exe")), Ok(Outcome::Enabled));
         assert_eq!(disable(&mut r, &mut h, SUR, PF), Ok(Outcome::Disabled));
         assert!(!h.removed);
-        assert_eq!(disable(&mut r, &mut h, "blink-surrogate-b.exe", PF), Ok(Outcome::Disabled));
+        assert_eq!(disable(&mut r, &mut h, "hayate-surrogate-b.exe", PF), Ok(Outcome::Disabled));
         assert!(h.removed);
     }
 
@@ -1547,7 +1616,7 @@ mod tests {
         let ik = ifeo_key(SUR);
         r.set(&ik, "Debugger", r"C:\tools\other.exe").unwrap();
         r.log.clear();
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Foreign(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Foreign(_))));
         assert!(r.log.is_empty() && !h.installed);
         assert_eq!(disable(&mut r, &mut h, SUR, PF), Ok(Outcome::ForeignKept));
         assert_eq!(r.get(&ik, "Debugger").unwrap().as_deref(), Some(r"C:\tools\other.exe"));
@@ -1558,7 +1627,7 @@ mod tests {
     fn failed_probe_rolls_back_exactly() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         h.probe = Err("no answer".into());
-        let e = enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).unwrap_err();
+        let e = enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).unwrap_err();
         assert!(matches!(e, Fail::Probe(_)) && e.exit_code() == EXIT_PROBE);
         assert!(r.vals.is_empty() && r.keys.is_empty() || r.keys.iter().all(|k| !r.vals.keys().any(|(kk, _)| kk == k)), "state left: {:?}", r.vals);
         assert_eq!(r.get(&ifeo_key(SUR), "Debugger").unwrap(), None);
@@ -1569,7 +1638,7 @@ mod tests {
     fn failed_write_rolls_back_too() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         r.fail_set = Some("Enabled".into());
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         assert_eq!(r.get(&ifeo_key(SUR), "Debugger").unwrap(), None);
         assert!(read_state(&r, SUR).is_none());
     }
@@ -1578,7 +1647,7 @@ mod tests {
     fn untrusted_launcher_writes_nothing() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         h.trust = Err("Users may write".into());
-        let e = enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).unwrap_err();
+        let e = enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).unwrap_err();
         assert!(matches!(e, Fail::Untrusted(_)));
         assert!(r.log.is_empty());
     }
@@ -1590,24 +1659,24 @@ mod tests {
         assert_eq!(expected_launcher(""), None);
         assert_eq!(expected_launcher(r"\\server\share"), None);
         let (mut r, mut h) = (Mem::default(), Fake::ok());
-        assert!(matches!(enable(&mut r, &mut h, SUR, "", BLINK, Some(SUR_IMG)), Err(Fail::Refused(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, "", HAYATE, Some(SUR_IMG)), Err(Fail::Refused(_))));
         assert!(r.log.is_empty());
         // the value is exactly the quoted launcher: nothing else ever reads as ours
         assert!(is_ours(&debugger_value(LAUNCHER), LAUNCHER));
-        assert!(!is_ours(r"C:\Users\u\blink.exe", LAUNCHER));
+        assert!(!is_ours(r"C:\Users\u\hayate.exe", LAUNCHER));
         assert!(!is_ours(&format!("\"{LAUNCHER}\" --extra"), LAUNCHER));
         assert!(!is_ours(LAUNCHER, LAUNCHER), "unquoted is not what Hayate writes");
     }
 
     #[test]
     fn targets_are_whitelisted() {
-        for ok in ["taskmgr.exe", "TaskMgr.EXE", "blink-surrogate-tm.exe", "blink-surrogate-1.exe"] {
+        for ok in ["taskmgr.exe", "TaskMgr.EXE", "hayate-surrogate-tm.exe", "hayate-surrogate-1.exe"] {
             assert!(valid_target(ok).is_some(), "{ok}");
         }
         assert!(valid_target("notepad.exe").is_none() && valid_target("cmd.exe").is_none() && valid_target(r"..\taskmgr.exe").is_none());
-        assert!(valid_target(r"C:\Windows\System32\taskmgr.exe").is_none() && valid_target("blink-surrogate-.exe").is_none());
+        assert!(valid_target(r"C:\Windows\System32\taskmgr.exe").is_none() && valid_target("hayate-surrogate-.exe").is_none());
         let (mut r, mut h) = (Mem::default(), Fake::ok());
-        assert_eq!(enable(&mut r, &mut h, "notepad.exe", PF, BLINK, None), Err(Fail::BadTarget));
+        assert_eq!(enable(&mut r, &mut h, "notepad.exe", PF, HAYATE, None), Err(Fail::BadTarget));
         assert_eq!(disable(&mut r, &mut h, "winlogon.exe", PF), Err(Fail::BadTarget));
         assert!(r.log.is_empty());
     }
@@ -1615,16 +1684,16 @@ mod tests {
     #[test]
     fn staging_target_needs_matching_image() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, None), Err(Fail::Refused(_))));
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(r"C:\stage\other.exe")), Err(Fail::Refused(_))));
-        assert!(matches!(enable(&mut r, &mut h, REAL_TARGET, PF, BLINK, Some(r"C:\x\taskmgr.exe")), Err(Fail::Refused(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, None), Err(Fail::Refused(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(r"C:\rig\other.exe")), Err(Fail::Refused(_))));
+        assert!(matches!(enable(&mut r, &mut h, REAL_TARGET, PF, HAYATE, Some(r"C:\x\taskmgr.exe")), Err(Fail::Refused(_))));
         assert!(r.log.is_empty());
     }
 
     #[test]
     fn real_target_uses_only_its_own_keys() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
-        assert_eq!(enable(&mut r, &mut h, "TASKMGR.EXE", PF, BLINK, None), Ok(Outcome::Enabled));
+        assert_eq!(enable(&mut r, &mut h, "TASKMGR.EXE", PF, HAYATE, None), Ok(Outcome::Enabled));
         let ok = |l: &String| l.contains(&ifeo_key(REAL_TARGET)) || l.contains(&state_key(REAL_TARGET)) || l == &format!("delk {STATE_KEY}");
         assert!(r.log.iter().all(ok), "{:?}", r.log);
         assert_eq!(disable(&mut r, &mut h, REAL_TARGET, PF), Ok(Outcome::Disabled));
@@ -1667,14 +1736,14 @@ mod tests {
         // another tool's value is left alone
         assert_eq!(uninstall_step(&Status::Foreign(r#""C:\Tools\procexp.exe""#.into())), UninstallStep::Nothing);
         // a value that mentions our launcher (extra args, other folder, unquoted) stops the uninstall
-        for v in [r#""C:\Program Files\Blink\blink-tm.exe" --x"#, r"C:\Program Files\Blink\blink-tm.exe", r#""D:\Apps\Blink\foo.exe""#, r#""C:\Other\BLINK-TM.EXE""#] {
+        for v in [r#""C:\Program Files\Hayate\hayate-tm.exe" --x"#, r"C:\Program Files\Hayate\hayate-tm.exe", r#""D:\Apps\Hayate\foo.exe""#, r#""C:\Other\HAYATE-TM.EXE""#] {
             assert!(matches!(uninstall_step(&Status::Foreign(v.into())), UninstallStep::Refuse(_)), "{v}");
         }
-        assert!(mentions_us("C:/x/Blink/y.exe") && !mentions_us(r"C:\Tools\blinkx.exe"));
+        assert!(mentions_us("C:/x/Hayate/y.exe") && !mentions_us(r"C:\Tools\hayatex.exe"));
         // through the whole decision (real Mem registry): a lookalike Debugger refuses
         let mut r = Mem::default();
         let h = Fake::ok();
-        r.set(&ifeo_key(SUR), "Debugger", r#""C:\Program Files\Blink\blink-tm.exe" extra"#).unwrap();
+        r.set(&ifeo_key(SUR), "Debugger", r#""C:\Program Files\Hayate\hayate-tm.exe" extra"#).unwrap();
         assert!(matches!(status(&r, &h, SUR, PF), Status::Foreign(_)));
         // gate: refuse stays refuse, turn-off from a per-user exe is refused, from Program Files allowed
         assert!(matches!(gate_plan(UninstallStep::Refuse("m".into()), false), GatePlan::Refuse(_)));
@@ -1687,7 +1756,7 @@ mod tests {
     fn seed_state(r: &mut Mem, l: &str) {
         let (ik, sk) = (ifeo_key(SUR), state_key(SUR));
         r.set(&ik, "Debugger", &debugger_value(l)).unwrap();
-        for (n, v) in [("LauncherPath", l), ("Enabled", "1"), ("BlinkPath", BLINK), ("NativePath", SUR_IMG)] {
+        for (n, v) in [("LauncherPath", l), ("Enabled", "1"), ("HayatePath", HAYATE), ("NativePath", SUR_IMG)] {
             r.set(&sk, n, v).unwrap();
         }
     }
@@ -1705,14 +1774,14 @@ mod tests {
         assert_eq!(h.removed_paths, vec![LAUNCHER.to_string()]);
         // a recorded path anywhere else (moved Program Files, planted state) is untrusted:
         // nothing is deleted, no value touched, and it is reported
-        for bad in [r"D:\Program Files\Blink\blink-tm.exe", r"C:\evil\blink-tm.exe", r"C:\Program Files\Blink\other.exe", r"C:\Program Files\Blink\..\x\blink-tm.exe", r"C:\Users\u\blink-tm.exe"] {
+        for bad in [r"D:\Program Files\Hayate\hayate-tm.exe", r"C:\evil\hayate-tm.exe", r"C:\Program Files\Hayate\other.exe", r"C:\Program Files\Hayate\..\x\hayate-tm.exe", r"C:\Users\u\hayate-tm.exe"] {
             let (mut r, mut h) = (Mem::default(), Fake::ok());
             seed_state(&mut r, bad);
             let before = r.vals.clone();
             assert!(matches!(disable(&mut r, &mut h, SUR, PF), Err(Fail::Untrusted(_))), "{bad}");
             assert_eq!(r.vals, before, "{bad}: nothing changed");
             assert!(h.removed_paths.is_empty(), "{bad}: no file deleted");
-            assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Untrusted(_))), "{bad}");
+            assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Untrusted(_))), "{bad}");
             assert_eq!(r.vals, before);
             assert!(!h.installed && h.removed_paths.is_empty());
             assert!(matches!(status(&r, &h, SUR, PF), Status::Stale(_)), "{bad}");
@@ -1720,7 +1789,7 @@ mod tests {
         }
         // without our state a lookalike value is a stranger's
         let mut r2 = Mem::default();
-        r2.set(&ik, "Debugger", &debugger_value(r"D:\Program Files\Blink\blink-tm.exe")).unwrap();
+        r2.set(&ik, "Debugger", &debugger_value(r"D:\Program Files\Hayate\hayate-tm.exe")).unwrap();
         assert!(matches!(status(&r2, &Fake::ok(), SUR, PF), Status::Foreign(_)));
     }
 
@@ -1732,7 +1801,7 @@ mod tests {
         h.state = Err("S-1-5-32-545 may change it".into());
         let (before, logged) = (r.vals.clone(), r.log.len());
         assert!(matches!(disable(&mut r, &mut h, SUR, PF), Err(Fail::Untrusted(_))));
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
         assert_eq!(r.vals, before);
         assert_eq!(r.log.len(), logged, "no registry write");
         assert!(!h.removed && !h.installed);
@@ -1742,24 +1811,24 @@ mod tests {
     #[test]
     fn rollback_keeps_the_launcher_a_restored_value_points_at() {
         // our earlier value is there but its state is gone; enable fails: the value is put back,
-        // so blink-tm.exe must stay (deleting it would leave no Task Manager)
+        // so hayate-tm.exe must stay (deleting it would leave no Task Manager)
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         let ik = ifeo_key(SUR);
         r.set(&ik, "Debugger", &debugger_value(LAUNCHER)).unwrap();
         h.probe = Err("no".into());
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Probe(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Probe(_))));
         assert_eq!(r.get(&ik, "Debugger").unwrap().as_deref(), Some(debugger_value(LAUNCHER).as_str()));
         assert!(h.installed && !h.removed && h.removed_paths.is_empty(), "launcher kept");
         // same when the copy fails
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         r.set(&ik, "Debugger", &debugger_value(LAUNCHER)).unwrap();
         h.trust = Err("x".into());
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
         assert!(!h.removed);
         // a first-time failure (no earlier value) still cleans up
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         h.probe = Err("no".into());
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         assert!(h.removed);
     }
 
@@ -1769,25 +1838,25 @@ mod tests {
         let mut r = Mem::default();
         r.set(&ik, "Debugger", &debugger_value(LAUNCHER)).unwrap();
         // an older state: no NativePath, odd schema, flag 1
-        for (n, v) in [("SchemaVersion", "0"), ("Enabled", "0"), ("LauncherPath", LAUNCHER), ("BlinkPath", r"C:\old\blink.exe"), ("PreviousDebuggerExisted", "1")] {
+        for (n, v) in [("SchemaVersion", "0"), ("Enabled", "0"), ("LauncherPath", LAUNCHER), ("HayatePath", r"C:\old\hayate.exe"), ("PreviousDebuggerExisted", "1")] {
             r.set(&sk, n, v).unwrap();
         }
         let before: BTreeMap<_, _> = r.vals.iter().filter(|((k, _), _)| k.starts_with(&sk.to_lowercase())).map(|(k, v)| (k.clone(), v.clone())).collect();
         let mut h = Fake::ok();
         h.probe = Err("no".into());
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         let after: BTreeMap<_, _> = r.vals.iter().filter(|((k, _), _)| k.starts_with(&sk.to_lowercase())).map(|(k, v)| (k.clone(), v.clone())).collect();
         assert_eq!(after, before, "state identical, NativePath (written by enable) gone again");
         // and a state that had NativePath gets it back
         let mut r = Mem::default();
         r.set(&ik, "Debugger", &debugger_value(LAUNCHER)).unwrap();
-        for (n, v) in [("SchemaVersion", "1"), ("Enabled", "0"), ("LauncherPath", LAUNCHER), ("BlinkPath", r"C:\old\blink.exe"), ("PreviousDebuggerExisted", "0"), ("NativePath", r"C:\old\blink-surrogate-tm.exe")] {
+        for (n, v) in [("SchemaVersion", "1"), ("Enabled", "0"), ("LauncherPath", LAUNCHER), ("HayatePath", r"C:\old\hayate.exe"), ("PreviousDebuggerExisted", "0"), ("NativePath", r"C:\old\hayate-surrogate-tm.exe")] {
             r.set(&sk, n, v).unwrap();
         }
         let before = r.vals.clone();
         let mut h = Fake::ok();
         h.probe = Err("no".into());
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         assert_eq!(r.vals, before);
     }
 
@@ -1803,11 +1872,11 @@ mod tests {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         let (ik, sk) = (ifeo_key(SUR), state_key(SUR));
         r.set(&ik, "Debugger", &debugger_value(old_l)).unwrap();
-        for (n, v) in [("LauncherPath", old_l), ("Enabled", "0"), ("BlinkPath", BLINK)] {
+        for (n, v) in [("LauncherPath", old_l), ("Enabled", "0"), ("HayatePath", HAYATE)] {
             r.set(&sk, n, v).unwrap();
         }
         h.probe = Err("no".into());
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Probe(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Probe(_))));
         assert_eq!(r.get(&ik, "Debugger").unwrap().as_deref(), Some(debugger_value(old_l).as_str()), "our previous value is back");
         assert_eq!(read_state(&r, SUR).unwrap().launcher, old_l);
         assert!(!h.removed, "state remains, so does the launcher");
@@ -1819,7 +1888,7 @@ mod tests {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         let ik = ifeo_key(SUR);
         r.race = Some(("PreviousDebuggerExisted=0".into(), (ik.clone(), "Debugger".into(), r"C:\tools\other.exe".into())));
-        let e = enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).unwrap_err();
+        let e = enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).unwrap_err();
         assert!(matches!(e, Fail::Foreign(_)));
         assert_eq!(r.get(&ik, "Debugger").unwrap().as_deref(), Some(r"C:\tools\other.exe"), "theirs is untouched");
         assert!(read_state(&r, SUR).is_none(), "our state is gone");
@@ -1829,7 +1898,7 @@ mod tests {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         r.race = Some(("Enabled=1".into(), (ik.clone(), "Debugger".into(), r"C:\tools\other.exe".into())));
         r.fail_set_val = Some(("Enabled".into(), "1".into()));
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         assert_eq!(r.get(&ik, "Debugger").unwrap().as_deref(), Some(r"C:\tools\other.exe"));
         assert!(r.log.iter().all(|l| !l.starts_with("delv")), "{:?}", r.log);
     }
@@ -1845,15 +1914,15 @@ mod tests {
         r.set(&ik, "Debugger", &debugger_value(LAUNCHER)).unwrap();
         r.set(&sk, "LauncherPath", LAUNCHER).unwrap();
         r.set(&sk, "Enabled", "0").unwrap();
-        assert_eq!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Ok(Outcome::Enabled));
+        assert_eq!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Ok(Outcome::Enabled));
         assert_eq!(r.get(&sk, "PreviousDebuggerExisted").unwrap().as_deref(), Some("1"));
     }
 
     #[test]
     fn folder_chain_is_checked_before_anything_is_copied() {
         let (mut r, mut h) = (Mem::default(), Fake::ok());
-        h.pre = Err("Users may write C:\\Program Files\\Blink".into());
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
+        h.pre = Err("Users may write C:\\Program Files\\Hayate".into());
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
         assert!(!h.installed && !h.removed && r.log.is_empty());
     }
 
@@ -1862,18 +1931,18 @@ mod tests {
         // probe fails: file, .new/.old and the empty folder go (Host::remove_launcher)
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         h.probe = Err("no answer".into());
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         assert!(h.installed && h.removed_paths == vec![LAUNCHER.to_string()]);
         // post-copy trust failure: same cleanup
         let (mut r, mut h) = (Mem::default(), Fake::ok());
         h.trust = Err("writable".into());
-        assert!(matches!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
+        assert!(matches!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)), Err(Fail::Untrusted(_))));
         assert!(h.removed && r.log.is_empty());
         // another redirect still needs the launcher: it stays
         let (mut r, mut h) = (Mem::default(), Fake::ok());
-        assert_eq!(enable(&mut r, &mut h, "blink-surrogate-b.exe", PF, BLINK, Some(r"C:\stage\blink-surrogate-b.exe")), Ok(Outcome::Enabled));
+        assert_eq!(enable(&mut r, &mut h, "hayate-surrogate-b.exe", PF, HAYATE, Some(r"C:\rig\hayate-surrogate-b.exe")), Ok(Outcome::Enabled));
         h.probe = Err("no".into());
-        assert!(enable(&mut r, &mut h, SUR, PF, BLINK, Some(SUR_IMG)).is_err());
+        assert!(enable(&mut r, &mut h, SUR, PF, HAYATE, Some(SUR_IMG)).is_err());
         assert!(!h.removed);
     }
 
@@ -1912,7 +1981,7 @@ mod tests {
         LaunchCtx { args: args.iter().map(|s| s.to_string()).collect(), shift, ctrl, guard_set: guard }
     }
     fn st(enabled: bool) -> State {
-        State { enabled, launcher: LAUNCHER.into(), blink_path: BLINK.into(), native_path: None, ..Default::default() }
+        State { enabled, launcher: LAUNCHER.into(), hayate_path: HAYATE.into(), native_path: None, ..Default::default() }
     }
 
     #[test]
@@ -1923,7 +1992,7 @@ mod tests {
         // Ctrl+Shift+Esc: Shift is still down but Ctrl too: not an escape
         assert_eq!(plan(&ctx(&["x"], true, true, false), Some(&s)), Plan::Show);
         assert_eq!(plan(&ctx(&["x"], false, true, false), Some(&s)), Plan::Show);
-        // switched off / no state: native, never Blink
+        // switched off / no state: native, never Hayate
         assert_eq!(plan(&ctx(&["x"], false, false, false), Some(&st(false))), Plan::Native(Why::Disabled));
         assert_eq!(plan(&ctx(&["x"], false, false, false), None), Plan::Native(Why::Disabled));
         // the probe's dry run wins over everything but the loop guard
@@ -1943,7 +2012,7 @@ mod tests {
         // the native path ignores argv and can never be the launcher
         assert_eq!(native_path(REAL_TARGET, r"C:\Windows", None, LAUNCHER).as_deref(), Some(r"C:\Windows\System32\taskmgr.exe"));
         assert_eq!(native_path(SUR, r"C:\Windows", Some(LAUNCHER), LAUNCHER), None);
-        assert_eq!(native_path(SUR, r"C:\Windows", Some(r"C:\stage\other.exe"), LAUNCHER), None);
+        assert_eq!(native_path(SUR, r"C:\Windows", Some(r"C:\rig\other.exe"), LAUNCHER), None);
         assert_eq!(native_path(SUR, r"C:\Windows", None, LAUNCHER), None);
         assert_eq!(native_path(SUR, r"C:\Windows", Some(SUR_IMG), LAUNCHER).as_deref(), Some(SUR_IMG));
     }
@@ -1952,16 +2021,16 @@ mod tests {
     fn argv_is_only_a_key() {
         let a = |s: &str| vec![s.to_string()];
         assert_eq!(target_from_args(&a(r"C:\Windows\System32\taskmgr.exe")), "taskmgr.exe");
-        assert_eq!(target_from_args(&a("\"C:\\stage\\Blink-Surrogate-TM.exe\"")), SUR);
+        assert_eq!(target_from_args(&a("\"C:\\rig\\Hayate-Surrogate-TM.exe\"")), SUR);
         // anything else falls to the real target; it can never name a program to run
         assert_eq!(target_from_args(&a(r"C:\Users\u\evil.exe")), "taskmgr.exe");
         assert_eq!(target_from_args(&[]), "taskmgr.exe");
-        assert!(blink_window_ok(BLINK, &BLINK.to_uppercase(), LAUNCHER));
-        assert!(!blink_window_ok(r"C:\Users\u\evil\blink.exe", BLINK, LAUNCHER));
-        assert!(!blink_window_ok(BLINK, "", ""));
-        // a Blink the launcher started itself runs as the launcher image
-        assert!(blink_window_ok(LAUNCHER, BLINK, LAUNCHER) && blink_window_ok(&LAUNCHER.to_uppercase(), "", LAUNCHER));
-        assert!(!blink_window_ok(LAUNCHER, BLINK, ""));
+        assert!(hayate_window_ok(HAYATE, &HAYATE.to_uppercase(), LAUNCHER));
+        assert!(!hayate_window_ok(r"C:\Users\u\evil\hayate.exe", HAYATE, LAUNCHER));
+        assert!(!hayate_window_ok(HAYATE, "", ""));
+        // a Hayate the launcher started itself runs as the launcher image
+        assert!(hayate_window_ok(LAUNCHER, HAYATE, LAUNCHER) && hayate_window_ok(&LAUNCHER.to_uppercase(), "", LAUNCHER));
+        assert!(!hayate_window_ok(LAUNCHER, HAYATE, ""));
     }
 
     // ---- cold start decision --------------------------------------------------------
@@ -1996,7 +2065,7 @@ mod tests {
             self.calls.push("show");
             self.seen.clone()
         }
-        fn start_blink(&mut self) -> Result<(), String> {
+        fn start_hayate(&mut self) -> Result<(), String> {
             self.calls.push("start");
             self.start.clone()
         }
@@ -2015,7 +2084,7 @@ mod tests {
     }
 
     #[test]
-    fn running_blink_is_shown_nothing_started() {
+    fn running_hayate_is_shown_nothing_started() {
         let mut m = Machine::new();
         m.seen = Seen::Shown;
         assert_eq!(launch(&Plan::Show, &mut m), Done { via: Via::Shown, ok: true });
@@ -2023,7 +2092,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_blink_is_cold_started_and_waited_for() {
+    fn absent_hayate_is_cold_started_and_waited_for() {
         let mut m = Machine::new();
         assert_eq!(launch(&Plan::Show, &mut m), Done { via: Via::ColdStarted, ok: true });
         assert_eq!(m.calls, ["show", "start", "wait"]);
@@ -2032,7 +2101,7 @@ mod tests {
     }
 
     #[test]
-    fn hung_blink_goes_native_without_a_second_start() {
+    fn hung_hayate_goes_native_without_a_second_start() {
         let mut m = Machine::new();
         m.seen = Seen::Hung;
         assert_eq!(launch(&Plan::Show, &mut m), Done { via: Via::Native(NativeWhy::Hung), ok: true });
@@ -2040,7 +2109,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_and_disabled_never_look_for_blink() {
+    fn shift_and_disabled_never_look_for_hayate() {
         for (plan, why) in [(Plan::Native(Why::Shift), NativeWhy::Shift), (Plan::Native(Why::Disabled), NativeWhy::Disabled)] {
             let mut m = Machine::new();
             assert_eq!(launch(&plan, &mut m), Done { via: Via::Native(why), ok: true });
@@ -2051,7 +2120,7 @@ mod tests {
     #[test]
     fn untrusted_launcher_starts_and_messages_nothing_but_native() {
         let mut m = Machine::new();
-        m.trust = Err(r"C:\Program Files\Blink: BU may change it".into());
+        m.trust = Err(r"C:\Program Files\Hayate: BU may change it".into());
         m.seen = Seen::Shown;
         assert_eq!(launch(&Plan::Show, &mut m), Done { via: Via::Native(NativeWhy::Untrusted), ok: true });
         assert_eq!(m.calls, ["native"]);
@@ -2066,7 +2135,7 @@ mod tests {
     }
 
     #[test]
-    fn no_window_in_time_ends_the_started_blink_then_native() {
+    fn no_window_in_time_ends_the_started_hayate_then_native() {
         let mut m = Machine::new();
         m.window = false;
         assert_eq!(launch(&Plan::Show, &mut m), Done { via: Via::Native(NativeWhy::NoWindow), ok: true });
@@ -2102,7 +2171,7 @@ mod tests {
         assert!(!cold_child(None, LAUNCHER));
         assert!(!cold_child(Some(""), LAUNCHER));
         assert!(!cold_child(Some(r"C:\Windows\explorer.exe"), LAUNCHER));
-        assert!(!cold_child(Some(BLINK), LAUNCHER));
+        assert!(!cold_child(Some(HAYATE), LAUNCHER));
     }
 
     fn folders() -> SystemFolders<'static> {
@@ -2113,9 +2182,9 @@ mod tests {
     fn child_env_is_a_whitelist_and_every_folder_comes_from_the_system() {
         let p = |a: &[(&str, &str)]| a.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
         let parent = p(&[
-            ("BLINK_DATA_DIR", r"C:\evil"),
-            ("blink_multi", "1"),
-            (GUARD_ENV, "1"),
+            ("HAYATE_DATA_DIR", r"C:\evil"),
+            ("hayate_multi", "1"),
+            ("HAYATE_TM_LAUNCHED", "1"),
             ("LocalAppData", r"C:\evil"),
             ("PATH", r"C:\evil"),
             ("ProgramFiles", r"C:\evil\pf"),
@@ -2136,7 +2205,7 @@ mod tests {
         ]);
         let env = child_env(&parent, &system_vars(&folders()));
         let get = |k: &str| env.iter().filter(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.as_str()).collect::<Vec<_>>();
-        assert!(env.iter().all(|(k, _)| !k.to_ascii_uppercase().starts_with("BLINK_")), "no BLINK_* survives");
+        assert!(env.iter().all(|(k, _)| !k.to_ascii_uppercase().starts_with("HAYATE_")), "no HAYATE_* survives");
         assert_eq!(get("LOCALAPPDATA"), [r"C:\Users\u\AppData\Local"], "the caller's spelling is replaced, not duplicated");
         assert_eq!(get("ProgramFiles"), [r"C:\Program Files"]);
         assert_eq!(get("ProgramW6432"), [r"C:\Program Files"]);
@@ -2186,7 +2255,7 @@ mod tests {
         let admin_only = [ace(SID_SYSTEM, 0x1F01FF, true), ace(SID_ADMINS, 0x1F01FF, true)];
         assert_eq!(lock_file_policy(SID_ADMINS, Some(&admin_only)), LockFile::Use);
         assert_eq!(lock_file_policy(SID_SYSTEM, Some(&admin_only)), LockFile::Use);
-        // the test machine finding: an inherited Users read/execute entry is enough to open and hold it
+        // the rig finding: an inherited Users read/execute entry is enough to open and hold it
         let mut inherited = admin_only.to_vec();
         inherited.push(ace("S-1-5-32-545", 0x1200A9, true));
         assert_eq!(lock_file_policy(SID_ADMINS, Some(&inherited)), LockFile::Recreate);
@@ -2213,7 +2282,7 @@ mod tests {
     }
 
     #[test]
-    fn lock_timeout_never_starts_blink() {
+    fn lock_timeout_never_starts_hayate() {
         let mut m = Machine::new();
         m.lock = false;
         assert_eq!(launch(&Plan::Show, &mut m), Done { via: Via::Native(NativeWhy::Busy), ok: true });
@@ -2281,7 +2350,7 @@ mod tests {
     #[test]
     fn acl_levels() {
         assert_eq!(level_for(LAUNCHER, LAUNCHER, PF), Level::File);
-        assert_eq!(level_for(r"C:\Program Files\Blink", LAUNCHER, PF), Level::Dir);
+        assert_eq!(level_for(r"C:\Program Files\Hayate", LAUNCHER, PF), Level::Dir);
         assert_eq!(level_for(PF, LAUNCHER, PF), Level::Ancestor);
         assert_eq!(level_for(r"C:\", LAUNCHER, PF), Level::Ancestor);
     }
@@ -2320,7 +2389,7 @@ mod tests {
     }
 
     fn run_refresh(r: &mut Mem, h: &mut Fake) -> Result<Refreshed, Fail> {
-        refresh(r, h, SUR, PF, BLINK)
+        refresh(r, h, SUR, PF, HAYATE)
     }
 
     #[test]
@@ -2343,7 +2412,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blink_that_is_not_newer_refuses_to_swap() {
+    fn a_hayate_that_is_not_newer_refuses_to_swap() {
         let (mut r, mut h) = on_stale();
         h.build = 1;
         let e = run_refresh(&mut r, &mut h).unwrap_err();
@@ -2431,11 +2500,11 @@ mod tests {
     }
 
     #[test]
-    fn refresh_follows_a_moved_blink_path_best_effort() {
+    fn refresh_follows_a_moved_hayate_path_best_effort() {
         let (mut r, mut h) = on_stale();
-        let other = r"C:\Program Files\Blink\blink.exe";
+        let other = r"C:\Program Files\Hayate\hayate.exe";
         assert_eq!(refresh(&mut r, &mut h, SUR, PF, other), Ok(Refreshed::Done));
-        assert_eq!(read_state(&r, SUR).unwrap().blink_path, other);
+        assert_eq!(read_state(&r, SUR).unwrap().hayate_path, other);
     }
 
     #[test]
@@ -2559,7 +2628,7 @@ mod tests {
         r.delete_value(&ifeo_key(SUR), "Debugger").unwrap();
         assert!(matches!(run_refresh(&mut r, &mut h), Err(Fail::Refused(_))), "Windows reset it: never silently re-added");
         assert!(h.calls.is_empty());
-        assert!(matches!(refresh(&mut r, &mut h, "notepad.exe", PF, BLINK), Err(Fail::BadTarget)));
+        assert!(matches!(refresh(&mut r, &mut h, "notepad.exe", PF, HAYATE), Err(Fail::BadTarget)));
     }
 
     #[test]
@@ -2641,7 +2710,7 @@ mod tests {
         }
         let (mut r, h) = on_stale();
         let mut l = Late(h, false);
-        assert_eq!(refresh(&mut r, &mut l, SUR, PF, BLINK), Ok(Refreshed::Repaired));
+        assert_eq!(refresh(&mut r, &mut l, SUR, PF, HAYATE), Ok(Refreshed::Repaired));
         assert_eq!(l.0.calls, ["lock", "restore", "probe", "unlock"], "no stage, no swap: the file was missing under the lock");
     }
 
@@ -2667,10 +2736,10 @@ mod tests {
     // ---- the swap protocol, with a crash at every point ------------------------------------
 
 
-    const P: &str = r"C:\Program Files\Blink\blink-tm.exe";
-    const N: &str = r"C:\Program Files\Blink\blink-tm.new.1.exe";
-    const R: &str = r"C:\Program Files\Blink\blink-tm.new.2.exe";
-    const O: &str = r"C:\Program Files\Blink\blink-tm.old.exe";
+    const P: &str = r"C:\Program Files\Hayate\hayate-tm.exe";
+    const N: &str = r"C:\Program Files\Hayate\hayate-tm.new.1.exe";
+    const R: &str = r"C:\Program Files\Hayate\hayate-tm.new.2.exe";
+    const O: &str = r"C:\Program Files\Hayate\hayate-tm.old.exe";
 
     #[derive(Clone, Default)]
     struct Disk {
@@ -2875,9 +2944,103 @@ mod tests {
             }
         }
         for c in [EXIT_IO, EXIT_REGISTRY, 99] {
-            assert!(!exit_message(c).contains("blink.log"), "the elevated helper writes no blink.log: {c}");
+            assert!(!exit_message(c).contains("hayate.log"), "the elevated helper writes no hayate.log: {c}");
         }
         assert!(!exit_message(EXIT_IO).contains("code"));
         assert!(!exit_message(EXIT_REGISTRY).contains("code"));
+    }
+
+    // ---- the pre-rename redirect (docs/rename-full.md step 6) ----
+
+    const OLD_LAUNCHER: &str = r"C:\Program Files\Blink\blink-tm.exe";
+    const OLD_EXE: &str = r"C:\Program Files\Blink\blink.exe";
+
+    fn legacy_redirect(reg: &mut Mem) {
+        reg.set(&ifeo_key(REAL_TARGET), "Debugger", &debugger_value(OLD_LAUNCHER)).unwrap();
+        let sk = state_key(REAL_TARGET);
+        reg.set(&sk, "SchemaVersion", "1").unwrap();
+        reg.set(&sk, "Enabled", "1").unwrap();
+        reg.set(&sk, "LauncherPath", OLD_LAUNCHER).unwrap();
+        reg.set(&sk, "HayatePath", OLD_EXE).unwrap();
+    }
+
+    #[test]
+    fn legacy_redirect_is_recognised_only_in_its_exact_quoted_form() {
+        let mut r = Mem::default();
+        legacy_redirect(&mut r);
+        r.set(&ifeo_key(REAL_TARGET), "Debugger", &debugger_value(OLD_LAUNCHER)).unwrap();
+        assert_eq!(legacy_uninstall_step(&r, PF), UninstallStep::TurnOff);
+        // any other form that still names the legacy launcher: abort, never guess
+        for bad in [r"C:\Program Files\Blink\blink-tm.exe".to_string(), format!("\"{OLD_LAUNCHER}\" --x"), r#""C:\Program Files\Blink\blink-tm.exe" "C:\other.exe""#.to_string()] {
+            r.set(&ifeo_key(REAL_TARGET), "Debugger", &bad).unwrap();
+            assert!(matches!(legacy_uninstall_step(&r, PF), UninstallStep::Refuse(_)), "{bad}");
+        }
+        r.set(&ifeo_key(REAL_TARGET), "Debugger", r#""C:\Program Files\Other\tm.exe""#).unwrap();
+        assert_eq!(legacy_uninstall_step(&r, PF), UninstallStep::Nothing);
+        r.delete_value(&ifeo_key(REAL_TARGET), "Debugger").unwrap();
+        assert_eq!(legacy_uninstall_step(&r, PF), UninstallStep::Nothing);
+    }
+
+    #[test]
+    fn legacy_redirect_turns_off_and_leaves_disabled_state() {
+        let mut r = Mem::default();
+        legacy_redirect(&mut r);
+        let mut h = Fake::ok();
+        assert_eq!(disable_legacy(&mut r, &mut h, REAL_TARGET, PF), Ok(Outcome::Disabled));
+        assert_eq!(r.get(&ifeo_key(REAL_TARGET), "Debugger"), Ok(None));
+        assert!(r.get(&state_key(REAL_TARGET), "Enabled").unwrap().is_none(), "state cleared");
+        assert_eq!(h.removed_paths, vec![OLD_LAUNCHER.to_string()]);
+        assert_eq!(status(&r, &h, REAL_TARGET, PF), Status::Off);
+        // second run: nothing to do
+        assert_eq!(disable_legacy(&mut r, &mut h, REAL_TARGET, PF), Ok(Outcome::AlreadyOff));
+    }
+
+    #[test]
+    fn legacy_redirect_leaves_foreign_values_and_a_working_state() {
+        let mut r = Mem::default();
+        legacy_redirect(&mut r);
+        r.set(&ifeo_key(REAL_TARGET), "Debugger", r#""C:\Program Files\Other\tm.exe""#).unwrap();
+        let mut h = Fake::ok();
+        assert_eq!(disable_legacy(&mut r, &mut h, REAL_TARGET, PF), Ok(Outcome::ForeignKept));
+        assert_eq!(r.get(&ifeo_key(REAL_TARGET), "Debugger"), Ok(Some(r#""C:\Program Files\Other\tm.exe""#.into())));
+        assert!(h.removed_paths.is_empty(), "a foreign value never removes our launcher");
+        // and an inexact mention is refused, value untouched
+        r.set(&ifeo_key(REAL_TARGET), "Debugger", &format!("\"{OLD_LAUNCHER}\" --extra")).unwrap();
+        assert!(matches!(disable_legacy(&mut r, &mut h, REAL_TARGET, PF), Err(Fail::Foreign(_))));
+        assert!(r.get(&ifeo_key(REAL_TARGET), "Debugger").unwrap().is_some());
+    }
+
+    #[test]
+    fn legacy_redirect_access_denied_changes_nothing() {
+        let mut base = Mem::default();
+        legacy_redirect(&mut base);
+        let before = base.get(&ifeo_key(REAL_TARGET), "Debugger").unwrap();
+        // a registry that refuses the delete (privilege lost between reads) must leave the value
+        struct Refuse(Mem);
+        impl Registry for Refuse {
+            fn get(&self, k: &str, n: &str) -> Result<Option<String>, String> {
+                self.0.get(k, n)
+            }
+            fn set(&mut self, k: &str, n: &str, v: &str) -> Result<(), String> {
+                self.0.set(k, n, v)
+            }
+            fn delete_value(&mut self, _: &str, _: &str) -> Result<(), String> {
+                Err("access denied".into())
+            }
+            fn delete_key(&mut self, _: &str) -> Result<(), String> {
+                Err("access denied".into())
+            }
+            fn is_empty(&self, k: &str) -> bool {
+                self.0.is_empty(k)
+            }
+            fn subkeys(&self, k: &str) -> Vec<String> {
+                self.0.subkeys(k)
+            }
+        }
+        let mut r = Refuse(base);
+        let mut h = Fake::ok();
+        assert!(matches!(disable_legacy(&mut r, &mut h, REAL_TARGET, PF), Err(Fail::Registry(_))));
+        assert!(h.removed_paths.is_empty(), "nothing removed when the registry refuses");
+        assert_eq!(r.0.get(&ifeo_key(REAL_TARGET), "Debugger").unwrap(), before, "the working redirect stays");
     }
 }

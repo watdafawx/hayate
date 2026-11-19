@@ -4,7 +4,7 @@
 //! the verdict clears. Pure state machine: no clock, no I/O, no Windows. The caller feeds one
 //! observation per Network paint and acts on the returned `Action`.
 //!
-//! Events can only be detected while the Network detail is shown and Blink is running: the
+//! Events can only be detected while the Network detail is shown and Hayate is running: the
 //! verdict is computed from counters that are only read then, and nothing polls on its own. A
 //! gap in the observations (detail hidden, window minimised) never counts as time in an incident:
 //! an open incident is closed at the last time it was seen failing.
@@ -29,16 +29,16 @@ pub const CLEAR_SECS: u64 = 30;
 pub const COOLDOWN_SECS: u64 = 600;
 /// Observations further apart than this are a gap (the detail was not shown).
 pub const GAP_SECS: u64 = 10;
-/// Test-only override of `INCIDENT_SECS` (smoke tests), 5..=3600. Compiled in debug builds
+/// Test-only override of `INCIDENT_SECS` (rig smoke tests), 5..=3600. Compiled in debug builds
 /// only: release always uses `INCIDENT_SECS`.
 #[cfg(debug_assertions)]
-pub const ENV_INCIDENT_SECS: &str = "BLINK_NET_INCIDENT_SECS";
+pub const ENV_INCIDENT_SECS: &str = "NET_INCIDENT_SECS";
 
 /// `INCIDENT_SECS`, or the test override.
 #[cfg(debug_assertions)]
 pub fn window_secs() -> u64 {
     static S: OnceLock<u64> = OnceLock::new();
-    *S.get_or_init(|| std::env::var(ENV_INCIDENT_SECS).ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|v| (5..=3600).contains(v)).unwrap_or(INCIDENT_SECS))
+    *S.get_or_init(|| crate::osutil::env_var(ENV_INCIDENT_SECS).ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|v| (5..=3600).contains(v)).unwrap_or(INCIDENT_SECS))
 }
 
 /// Release: no environment hook.

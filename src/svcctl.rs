@@ -210,7 +210,7 @@ impl Config {
             s => StartKind::from_raw(s, false),
         }
     }
-    /// Blink may change this one: a changeable type and a delayed flag that was really read.
+    /// Hayate may change this one: a changeable type and a delayed flag that was really read.
     pub fn changeable(&self) -> bool {
         self.delayed.is_some() && self.kind().is_some()
     }
@@ -365,7 +365,7 @@ fn undo_start(h: &mut dyn Retained, before: &Config, plan: &Plan, flag_err: &Scm
 /// (list row / open Properties panel); the service must still have it.
 ///
 /// One handle for the whole transaction: open → read → identity → "still what the
-/// user saw" → write(s) → (rollback of Blink's own write only) → read back → verify.
+/// user saw" → write(s) → (rollback of Hayate's own write only) → read back → verify.
 pub fn apply_startup(scm: &mut dyn Scm, t: &Target, expect: StartKind, want: StartKind) -> Result<StartupDone, String> {
     if let Some(why) = t.baseline_problem() {
         return Err(format!("not changed: {why}"));
@@ -1163,7 +1163,7 @@ mod real {
 
     /// The system's own Services console (services.msc). Absolute system paths
     /// (mmc.exe documents a full path to the .msc); ShellExecute "open" with the
-    /// caller's own rights: no elevation prompt is requested by Blink.
+    /// caller's own rights: no elevation prompt is requested by Hayate.
     ///
     /// Windows offers no documented way to open this console on one service or
     /// its Properties page: the mmc command line takes only the console file,
@@ -1431,7 +1431,7 @@ mod tests {
         c.delayed = None;
         assert_eq!(c.kind(), None, "Automatic vs Automatic (delayed start) is not known");
         assert!(!c.changeable());
-        // Manual / Disabled do not depend on the flag for what they are, but Blink still wants it read
+        // Manual / Disabled do not depend on the flag for what they are, but Hayate still wants it read
         c.start = 3;
         assert_eq!(c.kind(), Some(StartKind::Manual));
         assert!(!c.changeable(), "no change without a real read of the flag");
@@ -1678,7 +1678,7 @@ mod tests {
         assert!(e.contains("reading it back failed"), "{e}");
     }
 
-    // --- rollback: only Blink's own write, never a newer change
+    // --- rollback: only Hayate's own write, never a newer change
 
     #[test]
     fn flag_failure_after_start_change_puts_back_only_its_own_write_and_says_what_it_is() {
@@ -1694,7 +1694,7 @@ mod tests {
 
     #[test]
     fn rollback_never_overwrites_a_newer_change() {
-        // Blink writes start=2; before its delayed write fails, something else disables the service.
+        // Hayate writes start=2; before its delayed write fails, something else disables the service.
         let c = cfg(3, false);
         let t = target(&c);
         let mut f = Fake::new(c);
@@ -1877,13 +1877,13 @@ mod tests {
 
     #[test]
     fn a_service_recreated_mid_transaction_is_never_written_by_name() {
-        // Blink read the real service, then it was deleted and recreated under the same name.
-        // The write must go to the object Blink opened (now marked for deletion), not to the newcomer.
+        // Hayate read the real service, then it was deleted and recreated under the same name.
+        // The write must go to the object Hayate opened (now marked for deletion), not to the newcomer.
         let c = cfg(3, false);
         let t = target(&c);
         let mut f = Fake::new(c);
         f.set_hook(|w, ev| {
-            // right after Blink's read: the name now points at a different service object
+            // right after Hayate's read: the name now points at a different service object
             if ev == "read1" {
                 w.recreate(replacement());
             }
@@ -1899,7 +1899,7 @@ mod tests {
 
     #[test]
     fn rollback_and_read_back_stay_on_the_original_object_through_recreation() {
-        // start=2 lands on the service Blink opened; then it is deleted and recreated and the flag write
+        // start=2 lands on the service Hayate opened; then it is deleted and recreated and the flag write
         // fails. The put-back must not reach the newcomer either.
         let c = cfg(3, false);
         let t = target(&c);
@@ -2324,13 +2324,13 @@ mod tests {
     }
 
     /// Real SCM, real service. Needs a disposable fixture service named by
-    /// `BLINK_SVC_FIXTURE` that the current user may configure (the test machine run sets
+    /// `HAYATE_SVC_FIXTURE` that the current user may configure (the rig run sets
     /// its own ACL on it); everything else is skipped. See docs/services.md.
     #[test]
-    #[ignore = "needs BLINK_SVC_FIXTURE (a disposable service this user may configure)"]
+    #[ignore = "needs HAYATE_SVC_FIXTURE (a disposable service this user may configure)"]
     fn real_scm_startup_round_trip_changes_nothing_else() {
-        let Ok(name) = std::env::var("BLINK_SVC_FIXTURE") else { return };
-        assert!(name.to_lowercase().starts_with("blinkfixture"), "refusing to touch a service that is not a Hayate fixture");
+        let Ok(name) = crate::osutil::env_var("SVC_FIXTURE") else { return };
+        assert!(name.to_lowercase().starts_with("hayatefixture"), "refusing to touch a service that is not a Hayate fixture");
         let mut scm = Real;
         let c0 = read_once(&mut scm, &name).expect("fixture readable");
         let t = Target { name: name.clone(), display: c0.display.clone(), path: c0.path.clone(), state: c0.status.state, pid: c0.status.pid, can_stop: true, start: c0.start, delayed: c0.delayed.unwrap_or(false), trigger: false };
@@ -2353,7 +2353,7 @@ mod tests {
         assert!(apply_startup(&mut scm, &bad, kind, StartKind::Disabled).unwrap_err().contains("no longer the service"));
         // a name that does not exist fails closed
         let mut gone = t.clone();
-        gone.name = "BlinkFixtureDoesNotExist".into();
+        gone.name = "HayateFixtureDoesNotExist".into();
         assert!(apply_startup(&mut scm, &gone, kind, StartKind::Disabled).unwrap_err().contains("no longer exists"));
     }
 }

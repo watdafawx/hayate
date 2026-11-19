@@ -2,7 +2,7 @@
 //! jar or main class of a `java`, the script or package of a `node`, the entry
 //! of a `bun`, the module or script of a `python`, the assembly of a `dotnet`.
 //!
-//! Pure text parsing of the string Blink already holds. Nothing is executed,
+//! Pure text parsing of the string Hayate already holds. Nothing is executed,
 //! no file is opened and no path is resolved. A command line that is unknown
 //! or ambiguous (inline code, an argument file, a package script name, a flag
 //! whose value cannot be told from a positional) gives `None`, so the row
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn node_script_and_package() {
         assert_eq!(wl("node.exe", r#""C:\Program Files\nodejs\node.exe" --max-old-space-size=4096 C:\proj\api\dist\server.js --port 80"#), some("dist/server.js", "Node.js", "Node.js script"));
-        assert_eq!(wl("node.exe", r"node C:\w\blink-web\node_modules\vite\bin\vite.js dev"), some("vite", "Node.js", "Node.js package"));
+        assert_eq!(wl("node.exe", r"node C:\w\hayate-web\node_modules\vite\bin\vite.js dev"), some("vite", "Node.js", "Node.js package"));
         assert_eq!(wl("node.exe", r"node -r ts-node/register C:\w\node_modules\@anthropic-ai\claude-code\cli.js"), some("@anthropic-ai/claude-code", "Node.js", "Node.js package"));
         assert_eq!(wl("node.exe", r"node C:\w\node_modules\.bin\tsc.js"), some("tsc.js", "Node.js", "Node.js script"));
         assert_eq!(wl("node.exe", r"node C:\tools\build-things.mjs"), some("build-things.mjs", "Node.js", "Node.js script"));

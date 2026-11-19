@@ -148,7 +148,7 @@ pub fn text(raw: &Raw) -> Option<String> {
 #[cfg(test)]
 pub mod scratch {
     //! A disposable registry subtree under HKCU used as a stand-in for HKCU and
-    //! HKLM in tests. The subtree is named BlinkStartupFixture so nothing else
+    //! HKLM in tests. The subtree is named HayateStartupFixture so nothing else
     //! owns it, and it is deleted when the guard drops.
     use super::*;
 
@@ -162,7 +162,7 @@ pub mod scratch {
         pub fn new(tag: &str) -> Scratch {
             use std::sync::atomic::{AtomicU32, Ordering};
             static N: AtomicU32 = AtomicU32::new(0);
-            let base = format!(r"Software\BlinkStartupFixture\{}-{}-{}", tag, std::process::id(), N.fetch_add(1, Ordering::Relaxed));
+            let base = format!(r"Software\HayateStartupFixture\{}-{}-{}", tag, std::process::id(), N.fetch_add(1, Ordering::Relaxed));
             let user = create(HKEY_CURRENT_USER, &format!(r"{base}\user"), KEY_READ | KEY_WRITE).expect("scratch user root");
             let machine = create(HKEY_CURRENT_USER, &format!(r"{base}\machine"), KEY_READ | KEY_WRITE).expect("scratch machine root");
             Scratch { base, user, machine }
@@ -175,7 +175,7 @@ pub mod scratch {
             unsafe {
                 let _ = RegDeleteTreeW(HKEY_CURRENT_USER, pcw(&w));
                 // remove the parent when this was the last fixture
-                let p = wide(r"Software\BlinkStartupFixture");
+                let p = wide(r"Software\HayateStartupFixture");
                 let _ = RegDeleteKeyW(HKEY_CURRENT_USER, pcw(&p));
             }
         }

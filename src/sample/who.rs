@@ -6,7 +6,7 @@
 //! process identity (pid + create time, so a reused pid never inherits an
 //! answer). The UI never waits: it shows "looking up" until the answer comes.
 //!
-//! Uses only the access Blink already has: a limited-information process
+//! Uses only the access Hayate already has: a limited-information process
 //! handle and a query-only token. No privilege is enabled, no elevation is
 //! requested, nothing is injected. A process whose token cannot be opened
 //! (another user's, protected) answers `Unavailable`, which is the honest

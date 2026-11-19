@@ -316,8 +316,8 @@ pub fn spawn(shared: Arc<Shared>) {
 }
 
 /// Per-tick phase timings: always taken (one clock read per phase, for the
-/// `stall: sampler` line), logged every tick with `BLINK_TIMING=1`
-/// (`tick:` lines in blink.log: wall time, tick gap, then ms per phase).
+/// `stall: sampler` line), logged every tick with `HAYATE_TIMING=1`
+/// (`tick:` lines in hayate.log: wall time, tick gap, then ms per phase).
 struct Phases {
     on: bool,
     last: Instant,

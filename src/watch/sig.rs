@@ -229,7 +229,7 @@ mod tests {
         assert!(k.state.is_trusted(), "{:?}", k);
         assert!(k.publisher.contains("Microsoft"), "{:?}", k);
         // a text file is not signable → unsigned (or catalog-miss)
-        let tmp = std::env::temp_dir().join("blink-sig-test.txt");
+        let tmp = std::env::temp_dir().join("hayate-sig-test.txt");
         std::fs::write(&tmp, b"hello").unwrap();
         assert_eq!(check(tmp.to_str().unwrap()).state, SigState::Unsigned);
         assert!(!file_version(&format!("{}\\System32\\kernel32.dll", root)).is_empty());

@@ -31,16 +31,16 @@ pub const MENU_LINKS: [&str; 3] = [LINK_MAIN, LINK_ADMIN, LINK_PLAIN];
 pub fn all_menu_links() -> impl Iterator<Item = &'static str> {
     MENU_LINKS.into_iter().chain(LEGACY_MENU_LINKS)
 }
-/// in the user's Startup folder. Still `Blink.lnk` on purpose: the Startup
-/// manager's flag and StartupApproved state are keyed by this file name, so a
-/// rename would orphan them. Windows lists the file by name.
-pub const LINK_AUTO: &str = "Blink.lnk";
+/// in the user's Startup folder. Windows lists the file by this name; the
+/// pre-rename `Blink.lnk` and its StartupApproved byte are migrated in v0.2.0.
+
+pub const LINK_AUTO: &str = "Hayate.lnk";
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Where {
-    /// `%LOCALAPPDATA%\Programs\Blink\blink.exe`: no offer; Settings can uninstall
+    /// `%LOCALAPPDATA%\Programs\Hayate\hayate.exe`: no offer; Settings can uninstall
     User,
-    /// `%ProgramFiles%\Blink` (install.ps1 -Machine): Settings or Installed apps uninstall it (UAC)
+    /// `%ProgramFiles%\Hayate` (install.ps1 -Machine): Settings or Installed apps uninstall it (UAC)
     Machine,
     /// anywhere else: the offer bar
     Portable,
@@ -56,7 +56,24 @@ pub fn classify(exe_dir: &str, user_dir: &str, machine_dir: &str) -> Where {
     }
 }
 
-/// `%LOCALAPPDATA%\Blink\setup.ini`: the install offer's answers.
+/// [`classify`], and the pre-rename install folders count as installed too: a
+/// bridged update runs from `Programs\Blink` / `ProgramFiles\Blink` until the
+/// migration moves it (docs/rename-full.md).
+pub fn classify_any(exe_dir: &str, user_dir: &str, machine_dir: &str, legacy_user: &str, legacy_machine: &str) -> Where {
+    let w = classify(exe_dir, user_dir, machine_dir);
+    if w != Where::Portable {
+        return w;
+    }
+    if !legacy_user.trim().is_empty() && same_dir(&norm_path(exe_dir), &norm_path(legacy_user)) {
+        Where::User
+    } else if !legacy_machine.trim().is_empty() && same_dir(&norm_path(exe_dir), &norm_path(legacy_machine)) {
+        Where::Machine
+    } else {
+        Where::Portable
+    }
+}
+
+/// `%LOCALAPPDATA%\Hayate\setup.ini`: the install offer's answers.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Prefs {
     /// "Don't ask again"
@@ -110,21 +127,21 @@ impl Prefs {
     }
 }
 
-/// The in-window "Install Blink" bar shows for a portable copy the user has
+/// The in-window "Install Hayate" bar shows for a portable copy the user has
 /// not answered for this exe path.
 pub fn show_bar(w: &Where, prefs: &Prefs, exe: &str) -> bool {
     *w == Where::Portable && !prefs.never && !prefs.dismissed.contains(&norm_path(exe))
 }
 
-/// The bar, and also not while Blink is already installed (per-user or
-/// per-machine blink.exe exists): a dev or downloaded copy then stays quiet;
+/// The bar, and also not while Hayate is already installed (per-user or
+/// per-machine hayate.exe exists): a dev or downloaded copy then stays quiet;
 /// Settings still offers "Install this copy".
 pub fn offer(w: &Where, installed: bool, prefs: &Prefs, exe: &str) -> bool {
     !installed && show_bar(w, prefs, exe)
 }
 
 /// Auto-update default: the folder this exe runs from, only when it is a
-/// the publish step drop (blink.exe + blink.exe.sha256 + version.txt) outside
+/// publish.ps1 drop (hayate.exe + hayate.exe.sha256 + version.txt) outside
 /// the install dir. Otherwise off.
 pub fn update_default(exe_dir: &str, has_sha: bool, has_version: bool, install_dir: &str) -> Option<String> {
     (has_sha && has_version && source_allowed(exe_dir, install_dir).is_ok()).then(|| exe_dir.trim_end_matches(['\\', '/']).to_string())
@@ -150,12 +167,12 @@ pub struct Link {
     pub app_id: Option<String>,
     /// SLDF_RUNAS_USER: the shell asks UAC on every start
     pub runas: bool,
-    /// stamps System.AppUserModel.ToastActivatorCLSID (Blink.lnk only)
+    /// stamps System.AppUserModel.ToastActivatorCLSID (Hayate.lnk only)
     pub toast: bool,
 }
 
 /// Start-menu links for a choice, plus the names to delete (the other variant).
-/// Only Blink.lnk carries Blink's own app ID and the toast activator; the
+/// Only Hayate.lnk carries Hayate's own app ID and the toast activator; the
 /// second link gets an ID of its own, else Windows names toasts after it.
 pub fn menu_links(admin_default: bool, aumid: &str) -> (Vec<Link>, Vec<&'static str>) {
     let main = Link {
@@ -209,8 +226,8 @@ pub fn update_ini(source: &str, install_dir: &str) -> String {
 }
 
 /// `LocalServer32` value: `"<exe>" -ToastActivated`, plus the private
-/// test-environment args (BLINK_DATA_DIR / BLINK_MULTI) when the installer
-/// itself ran with them, so a test instance gets its own toasts back.
+/// test-environment args (HAYATE_DATA_DIR / HAYATE_MULTI) when the installer
+/// itself ran with them, so a rig test instance gets its own toasts back.
 pub fn local_server(exe: &str, extra: &[String]) -> String {
     let mut a = vec![TOAST_ARG.to_string()];
     a.extend(extra.iter().cloned());
@@ -230,36 +247,44 @@ pub fn safe_to_remove(p: &str) -> bool {
     abs && n.trim_end_matches('\\').split('\\').count() >= 3
 }
 
-/// The data dir may go only when it is Blink's own (leaf `Blink…`), never a
-/// BLINK_DATA_DIR override pointing at some shared folder.
+/// The data dir may go only when it is Hayate's own (leaf `Hayate…`), never a
+/// HAYATE_DATA_DIR override pointing at some shared folder.
 pub fn data_dir_removable(data_dir: &str, install_dir: &str) -> bool {
     let n = norm_path(data_dir);
     let leaf = n.trim_end_matches('\\').rsplit('\\').next().unwrap_or("");
     // not a parent of the install dir, nor inside it (that goes anyway)
-    leaf.starts_with("blink") && safe_to_remove(data_dir) && !inside_or_same(install_dir, data_dir) && !inside_or_same(data_dir, install_dir)
+    leaf.starts_with("hayate") && safe_to_remove(data_dir) && !inside_or_same(install_dir, data_dir) && !inside_or_same(data_dir, install_dir)
 }
 
-/// Uninstall cannot delete the running blink.exe, but Windows lets a running
-/// exe be renamed (the self-updater's blink.old.exe swap does the same). It
-/// moves to `%TEMP%\Blink-uninstalled\blink-<pid>.exe`, so the install dir
+/// The same rule for the pre-rename data dir (`Blink`), which an uninstall removes
+/// only when the user asked for the settings to go.
+pub fn legacy_data_dir_removable(data_dir: &str, install_dir: &str) -> bool {
+    let n = norm_path(data_dir);
+    let leaf = n.trim_end_matches('\\').rsplit('\\').next().unwrap_or("");
+    leaf.eq_ignore_ascii_case("blink") && safe_to_remove(data_dir) && !inside_or_same(install_dir, data_dir) && !inside_or_same(data_dir, install_dir)
+}
+
+/// Uninstall cannot delete the running hayate.exe, but Windows lets a running
+/// exe be renamed (the self-updater's hayate.old.exe swap does the same). It
+/// moves to `%TEMP%\Hayate-uninstalled\hayate-<pid>.exe`, so the install dir
 /// goes at once, in-process: no helper process, no cmd.exe, no reboot key.
-/// The next Blink start (any copy) or Storage Sense deletes the parked file.
-pub const PARK_DIR: &str = "Blink-uninstalled";
+/// The next Hayate start (any copy) or Storage Sense deletes the parked file.
+pub const PARK_DIR: &str = "Hayate-uninstalled";
 
 pub fn parked_exe(temp: &str, pid: u32) -> String {
-    format!("{}\\{PARK_DIR}\\blink-{pid}.exe", temp.trim_end_matches(['\\', '/']))
+    format!("{}\\{PARK_DIR}\\hayate-{pid}.exe", temp.trim_end_matches(['\\', '/']))
 }
 
-/// Files in the park dir a sweep may delete: only `blink-<digits>.exe`.
+/// Files in the park dir a sweep may delete: only `hayate-<digits>.exe`.
 pub fn is_parked_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    n.strip_prefix("blink-").and_then(|r| r.strip_suffix(".exe")).is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()))
+    n.strip_prefix("hayate-").and_then(|r| r.strip_suffix(".exe")).is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()))
 }
 
-// ---- Installed apps (Add/Remove Programs) and `blink.exe --uninstall` ----------
+// ---- Installed apps (Add/Remove Programs) and `hayate.exe --uninstall` ----------
 
-/// `blink.exe --uninstall`: what Windows' Installed apps list runs. No window
-/// of Blink's own: two native boxes ask, then the normal uninstall runs.
+/// `hayate.exe --uninstall`: what Windows' Installed apps list runs. No window
+/// of Hayate's own: two native boxes ask, then the normal uninstall runs.
 pub const ARG_UNINSTALL: &str = "--uninstall";
 
 /// A start with the uninstall argument (an exact flag: it carries no path, so
@@ -318,7 +343,7 @@ impl ArpKey {
         }
     }
 }
-/// Not the app name: winget matched an ARP entry published as "Blink" to an unrelated package.
+/// Not the app name: winget matched an ARP entry published as "Hayate" to an unrelated package.
 pub const ARP_PUBLISHER: &str = "Hayate Project";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -348,7 +373,7 @@ pub fn arp_uninstall_string(exe: &str) -> String {
 }
 
 /// The values of the entry (install.ps1 writes the same). `dir` is the install
-/// dir, `exe` its blink.exe, `size_kb` the exe size (EstimatedSize).
+/// dir, `exe` its hayate.exe, `size_kb` the exe size (EstimatedSize).
 pub fn arp_values(version: &str, exe: &str, dir: &str, size_kb: u32) -> Vec<ArpValue> {
     vec![
         ArpValue::Str("DisplayName", crate::osutil::APP_NAME.into()),
@@ -380,7 +405,7 @@ fn same_path(a: &str, b: &str) -> bool {
 
 /// The legacy `Blink` key is ours only when it was written for THIS install:
 /// DisplayName Blink/Hayate, InstallLocation = `dir`, and an UninstallString
-/// that starts our `"<dir>\blink.exe"`. Anything else (another program's entry
+/// that starts `"<dir>\blink.exe"`. Anything else (another program's entry
 /// that happens to be called Blink) is never touched.
 pub fn legacy_arp_is_ours(store: &impl ArpStore, h: Hive, dir: &str) -> bool {
     let k = ArpKey::Legacy;
@@ -435,7 +460,7 @@ pub fn arp_refresh(store: &mut impl ArpStore, at: &Where, elevated: bool, vals: 
         ArpValue::Str(n, want) => store.read_str(h, ArpKey::Current, n).as_deref() == Some(want.as_str()),
         ArpValue::Dword(n, want) => store.read_dword(h, ArpKey::Current, n) == Some(*want),
     });
-    // the pre-rename `Blink` key: new key first, then the old one goes, so a crash in
+    // the pre-rename `Hayate` key: new key first, then the old one goes, so a crash in
     // between leaves both, and both present breaks nothing
     let dir = vals.iter().find_map(|v| match v {
         ArpValue::Str("InstallLocation", d) => Some(d.as_str()),
@@ -453,9 +478,15 @@ pub fn arp_refresh(store: &mut impl ArpStore, at: &Where, elevated: bool, vals: 
     Ok(if same { ArpOutcome::Current } else { ArpOutcome::Written(h) })
 }
 
-/// The one exe of an install: `<dir>\blink.exe`.
-pub fn is_blink_exe(exe: &str) -> bool {
-    exe.rsplit(['\\', '/']).next().is_some_and(|n| n.eq_ignore_ascii_case("blink.exe"))
+/// The one exe of an install: `<dir>\hayate.exe`.
+pub fn is_hayate_exe(exe: &str) -> bool {
+    exe.rsplit(['\\', '/']).next().is_some_and(|n| n.eq_ignore_ascii_case("hayate.exe"))
+}
+
+/// An exe of an install of either generation: `hayate.exe`, or the pre-rename
+/// `blink.exe` (recognised by `--uninstall` until the migration has moved it).
+pub fn is_installed_exe(exe: &str) -> bool {
+    exe.rsplit(['\\', '/']).next().is_some_and(|n| n.eq_ignore_ascii_case("hayate.exe") || n.eq_ignore_ascii_case("blink.exe"))
 }
 
 #[derive(Debug, PartialEq)]
@@ -467,15 +498,16 @@ pub enum UninstallPlan {
 }
 
 /// `--uninstall` acts on the running exe's own install and nothing else: the
-/// exe must be `blink.exe` directly inside the per-user or the all-users
-/// install dir (both from known folders, given by the caller). A portable
-/// copy, a copy in a sub folder or blink-tm.exe is refused.
-pub fn uninstall_plan(exe: &str, user_dir: &str, machine_dir: &str, elevated: bool) -> Result<UninstallPlan, String> {
-    if !is_blink_exe(exe) {
+/// exe must be `hayate.exe` (or the pre-rename `blink.exe`) directly inside the
+/// per-user or the all-users install dir, current or pre-rename (both from
+/// known folders, given by the caller). A portable copy, a copy in a sub folder
+/// or hayate-tm.exe is refused.
+pub fn uninstall_plan(exe: &str, user_dir: &str, machine_dir: &str, legacy_user: &str, legacy_machine: &str, elevated: bool) -> Result<UninstallPlan, String> {
+    if !is_installed_exe(exe) {
         return Err("This is not an installed copy of Hayate.".into());
     }
     let dir = exe.rsplit_once(['\\', '/']).map(|(d, _)| d).unwrap_or("");
-    match classify(dir, user_dir, machine_dir) {
+    match classify_any(dir, user_dir, machine_dir, legacy_user, legacy_machine) {
         Where::User => Ok(UninstallPlan::Run),
         Where::Machine if elevated => Ok(UninstallPlan::Run),
         Where::Machine => Ok(UninstallPlan::Elevate),
@@ -496,10 +528,12 @@ pub fn confirm_text(w: &Where) -> String {
 /// Second box (Yes / No), asked only when the data folder may be deleted
 /// (`data_dir_removable`); otherwise settings and history are kept. For an
 /// all-users install it names whose folder this is: only the account that runs
-/// the uninstall is touched, other users keep theirs.
-pub fn data_question(w: &Where, data_dir: &str) -> String {
+/// the uninstall is touched, other users keep theirs. `legacy` names the
+/// pre-rename settings folder when it is still there and removable too.
+pub fn data_question(w: &Where, data_dir: &str, legacy: Option<&str>) -> String {
     let who = if *w == Where::Machine { " That is the folder of the account you are using now; the settings of other users stay." } else { "" };
-    format!("Also delete your Hayate settings and history?\n\nThey are in {data_dir}.{who} Choose No to keep them in case you install Hayate again.")
+    let old = legacy.map(|l| format!(" The settings of the version before the rename are in {l}; they go too.")).unwrap_or_default();
+    format!("Also delete your Hayate settings and history?\n\nThey are in {data_dir}.{who}{old} Choose No to keep them in case you install Hayate again.")
 }
 
 /// What happened to the settings folder at the end of an uninstall.
@@ -589,7 +623,7 @@ pub enum MachinePlan {
 pub fn machine_install_plan(at: &Where, elevated: bool) -> Result<MachinePlan, String> {
     match at {
         Where::Machine => Err("Hayate is already installed for everyone on this PC.".into()),
-        Where::User => Err("This copy is the one installed just for you. Run a downloaded blink.exe to install it for everyone.".into()),
+        Where::User => Err("This copy is the one installed just for you. Run a downloaded hayate.exe to install it for everyone.".into()),
         Where::Portable if elevated => Ok(MachinePlan::Run),
         Where::Portable => Ok(MachinePlan::Elevate),
     }
@@ -606,9 +640,9 @@ pub const MI_DECLINED: i32 = 4;
 
 pub fn machine_exit_text(code: i32) -> &'static str {
     match code {
-        MI_REFUSED => "Hayate could not be installed for everyone: this copy is not allowed to be (see blink.log).",
+        MI_REFUSED => "Hayate could not be installed for everyone: this copy is not allowed to be (see hayate.log).",
         MI_LAUNCH_FAILED => "Hayate was installed for everyone, but it could not be started. Open it from the Start menu.",
-        _ => "Installing for everyone did not finish. Nothing was left half installed. The reason is in blink.log.",
+        _ => "Installing for everyone did not finish. Nothing was left half installed. The reason is in hayate.log.",
     }
 }
 
@@ -628,16 +662,26 @@ pub fn park_base(local_app_data: &str) -> String {
 mod tests {
     use super::*;
 
-    const U: &str = r"C:\Users\a\AppData\Local\Programs\Blink";
-    const M: &str = r"C:\Program Files\Blink";
+    const U: &str = r"C:\Users\a\AppData\Local\Programs\Hayate";
+    const M: &str = r"C:\Program Files\Hayate";
+
+    #[test]
+    fn legacy_data_dir_removable_only_for_the_legacy_leaf() {
+        let i = r"C:\Users\a\AppData\Local\Programs\Hayate";
+        assert!(legacy_data_dir_removable(r"C:\Users\a\AppData\Local\Blink", i));
+        assert!(!legacy_data_dir_removable(r"C:\Users\a\AppData\Local\Hayate", i), "only the pre-rename leaf");
+        assert!(!legacy_data_dir_removable(r"C:\Users\a\AppData\Local\Blink\sub", i), "not a sub folder");
+        assert!(!legacy_data_dir_removable(r"C:\", i), "never a drive root");
+        assert!(!legacy_data_dir_removable(r"C:\Users\a\AppData\Local\Blink", r"C:\Users\a\AppData\Local\Blink\Programs"), "never a parent of the install");
+    }
 
     #[test]
     fn where_it_runs() {
         assert_eq!(classify(U, U, M), Where::User);
         assert_eq!(classify(&format!("{}\\", U.to_uppercase()), U, M), Where::User);
-        assert_eq!(classify(r"c:/program files/blink", U, M), Where::Machine);
+        assert_eq!(classify(r"c:/program files/hayate", U, M), Where::Machine);
         assert_eq!(classify(r"C:\Users\a\Downloads", U, M), Where::Portable);
-        assert_eq!(classify(r"X:\Dev\blink\target\release", U, ""), Where::Portable);
+        assert_eq!(classify(r"C:\src\hayate\target\release", U, ""), Where::Portable);
         // a folder inside the install dir is not the install dir
         assert_eq!(classify(&format!(r"{U}\sub"), U, M), Where::Portable);
     }
@@ -645,7 +689,7 @@ mod tests {
     #[test]
     fn prefs_round_trip_and_bar() {
         let mut p = Prefs::default();
-        let exe = r"C:\Users\a\Downloads\blink.exe";
+        let exe = r"C:\Users\a\Downloads\hayate.exe";
         assert!(show_bar(&Where::Portable, &p, exe));
         assert!(!show_bar(&Where::User, &p, exe));
         assert!(!show_bar(&Where::Machine, &p, exe));
@@ -655,7 +699,7 @@ mod tests {
         let back = parse_prefs(&write_prefs(&p));
         assert_eq!(back, p);
         assert!(!show_bar(&Where::Portable, &back, exe));
-        assert!(show_bar(&Where::Portable, &back, r"D:\other\blink.exe"));
+        assert!(show_bar(&Where::Portable, &back, r"D:\other\hayate.exe"));
         // the taskbar Jump List is on unless switched off, and the answer survives a rewrite
         assert!(!parse_prefs("").jumplist_off);
         let off = parse_prefs("jumplist = false\n");
@@ -663,20 +707,20 @@ mod tests {
         assert!(parse_prefs(&write_prefs(&off)).jumplist_off);
         assert!(!parse_prefs(&write_prefs(&Prefs::default())).jumplist_off);
         let never = parse_prefs("never = true\n");
-        assert!(!show_bar(&Where::Portable, &never, r"D:\other\blink.exe"));
+        assert!(!show_bar(&Where::Portable, &never, r"D:\other\hayate.exe"));
         // bounded
         let mut q = Prefs::default();
         for i in 0..40 {
-            q.dismiss(&format!(r"C:\d{i}\blink.exe"));
+            q.dismiss(&format!(r"C:\d{i}\hayate.exe"));
         }
         let q2 = parse_prefs(&write_prefs(&q));
         assert_eq!(q2.dismissed.len(), 16);
-        assert_eq!(q2.dismissed.last().unwrap(), r"c:\d39\blink.exe");
+        assert_eq!(q2.dismissed.last().unwrap(), r"c:\d39\hayate.exe");
     }
 
     #[test]
     fn update_source_only_from_a_publish_folder() {
-        let d = r"X:\Dev\blink\dist";
+        let d = r"C:\src\hayate\dist";
         assert_eq!(update_default(d, true, true, U).as_deref(), Some(d));
         assert_eq!(update_default(&format!("{d}\\"), true, true, U).as_deref(), Some(d));
         assert_eq!(update_default(d, false, true, U), None);
@@ -686,14 +730,14 @@ mod tests {
 
     #[test]
     fn links_for_each_choice() {
-        let (l, rm) = menu_links(false, "Blink.TaskManager");
+        let (l, rm) = menu_links(false, "Hayate.TaskManager");
         assert_eq!(l.len(), 2);
-        assert!(l[0].name == LINK_MAIN && !l[0].runas && l[0].toast && l[0].app_id.as_deref() == Some("Blink.TaskManager"));
-        assert!(l[1].name == LINK_ADMIN && l[1].runas && !l[1].toast && l[1].app_id.as_deref() == Some("Blink.TaskManager.Admin"));
+        assert!(l[0].name == LINK_MAIN && !l[0].runas && l[0].toast && l[0].app_id.as_deref() == Some("Hayate.TaskManager"));
+        assert!(l[1].name == LINK_ADMIN && l[1].runas && !l[1].toast && l[1].app_id.as_deref() == Some("Hayate.TaskManager.Admin"));
         assert_eq!(rm, vec![LINK_PLAIN, "Blink.lnk", "Blink (admin).lnk", "Blink (no admin).lnk"]);
-        let (l, rm) = menu_links(true, "Blink.TaskManager");
+        let (l, rm) = menu_links(true, "Hayate.TaskManager");
         assert!(l[0].name == LINK_MAIN && l[0].runas && l[0].toast);
-        assert!(l[1].name == LINK_PLAIN && !l[1].runas && l[1].app_id.as_deref() == Some("Blink.TaskManager.User"));
+        assert!(l[1].name == LINK_PLAIN && !l[1].runas && l[1].app_id.as_deref() == Some("Hayate.TaskManager.User"));
         assert_eq!(rm, vec![LINK_ADMIN, "Blink.lnk", "Blink (admin).lnk", "Blink (no admin).lnk"]);
         let a = autostart_link();
         assert!(a.args == "--resident" && !a.runas && a.app_id.is_none());
@@ -701,9 +745,9 @@ mod tests {
 
     #[test]
     fn toast_server_command() {
-        assert_eq!(local_server(r"C:\a b\blink.exe", &[]), r#""C:\a b\blink.exe" -ToastActivated"#);
-        let x = local_server(r"C:\b\blink.exe", &["--update-data-dir".into(), r"C:\t d".into(), "--update-multi".into()]);
-        assert_eq!(x, r#""C:\b\blink.exe" -ToastActivated --update-data-dir "C:\t d" --update-multi"#);
+        assert_eq!(local_server(r"C:\a b\hayate.exe", &[]), r#""C:\a b\hayate.exe" -ToastActivated"#);
+        let x = local_server(r"C:\b\hayate.exe", &["--update-data-dir".into(), r"C:\t d".into(), "--update-multi".into()]);
+        assert_eq!(x, r#""C:\b\hayate.exe" -ToastActivated --update-data-dir "C:\t d" --update-multi"#);
         assert!(is_toast_launch(&["-ToastActivated".into(), "-Embedding".into()]));
         assert!(is_toast_launch(&["-toastactivated".into()]));
         assert!(!is_toast_launch(&["--resident".into()]));
@@ -717,28 +761,28 @@ mod tests {
         assert!(!safe_to_remove(r"C:\"));
         assert!(!safe_to_remove(r"C:\Users"));
         assert!(!safe_to_remove(r"C:\Users\"));
-        assert!(!safe_to_remove(r"\\server\share\Blink"));
-        assert!(!safe_to_remove("Blink"));
-        assert!(data_dir_removable(r"C:\Users\a\AppData\Local\Blink", U));
-        assert!(data_dir_removable(r"C:\Users\a\AppData\Local\Blink-multi\", U));
+        assert!(!safe_to_remove(r"\\server\share\Hayate"));
+        assert!(!safe_to_remove("Hayate"));
+        assert!(data_dir_removable(r"C:\Users\a\AppData\Local\Hayate", U));
+        assert!(data_dir_removable(r"C:\Users\a\AppData\Local\Hayate-multi\", U));
         assert!(!data_dir_removable(r"C:\Users\a\AppData\Local", U));
         assert!(!data_dir_removable(r"C:\Users\a\Documents", U));
-        assert!(!data_dir_removable(r"C:\Blink", U));
-        assert!(!data_dir_removable(&format!(r"{U}\blink-data"), U));
-        assert_eq!(parked_exe(r"C:\Users\a\AppData\Local\Temp\", 42), r"C:\Users\a\AppData\Local\Temp\Blink-uninstalled\blink-42.exe");
-        assert!(is_parked_name("blink-42.exe"));
-        assert!(is_parked_name("BLINK-7.EXE"));
-        assert!(!is_parked_name("blink-.exe"));
-        assert!(!is_parked_name("blink-4x.exe"));
+        assert!(!data_dir_removable(r"C:\Hayate", U));
+        assert!(!data_dir_removable(&format!(r"{U}\hayate-data"), U));
+        assert_eq!(parked_exe(r"C:\Users\a\AppData\Local\Temp\", 42), r"C:\Users\a\AppData\Local\Temp\Hayate-uninstalled\hayate-42.exe");
+        assert!(is_parked_name("hayate-42.exe"));
+        assert!(is_parked_name("HAYATE-7.EXE"));
+        assert!(!is_parked_name("hayate-.exe"));
+        assert!(!is_parked_name("hayate-4x.exe"));
         assert!(!is_parked_name("other.exe"));
-        assert!(!is_parked_name("blink-42.exe.txt"));
+        assert!(!is_parked_name("hayate-42.exe.txt"));
     }
 
     #[test]
     fn offer_hidden_when_installed() {
         let p = Prefs::default();
-        assert!(!offer(&Where::Portable, true, &p, r"D:\x\blink.exe"));
-        assert!(offer(&Where::Portable, false, &p, r"D:\x\blink.exe"));
+        assert!(!offer(&Where::Portable, true, &p, r"D:\x\hayate.exe"));
+        assert!(offer(&Where::Portable, false, &p, r"D:\x\hayate.exe"));
     }
 
     fn sec_pos(ps: &str, needle: &str) -> usize {
@@ -802,7 +846,7 @@ mod tests {
     }
 
     fn vals() -> Vec<ArpValue> {
-        arp_values("1.2.3", r"C:\Program Files\Blink\blink.exe", r"C:\Program Files\Blink", 2300)
+        arp_values("1.2.3", r"C:\Program Files\Hayate\hayate.exe", r"C:\Program Files\Hayate", 2300)
     }
 
     #[test]
@@ -813,9 +857,9 @@ mod tests {
         assert_eq!(s("DisplayName"), Some("Hayate"));
         assert_eq!(s("DisplayVersion"), Some("1.2.3"));
         assert_eq!(s("Publisher"), Some(ARP_PUBLISHER));
-        assert_eq!(s("DisplayIcon"), Some(r"C:\Program Files\Blink\blink.exe"));
-        assert_eq!(s("InstallLocation"), Some(r"C:\Program Files\Blink"));
-        assert_eq!(s("UninstallString"), Some(r#""C:\Program Files\Blink\blink.exe" --uninstall"#));
+        assert_eq!(s("DisplayIcon"), Some(r"C:\Program Files\Hayate\hayate.exe"));
+        assert_eq!(s("InstallLocation"), Some(r"C:\Program Files\Hayate"));
+        assert_eq!(s("UninstallString"), Some(r#""C:\Program Files\Hayate\hayate.exe" --uninstall"#));
         assert_eq!((d("NoModify"), d("NoRepair"), d("EstimatedSize")), (Some(1), Some(1), Some(2300)));
         assert_eq!(ARP_KEY, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Hayate");
         assert_eq!(ARP_KEY_LEGACY, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Blink");
@@ -836,7 +880,7 @@ mod tests {
         assert_eq!(m.writes, 1);
         assert!(m.machine.is_empty());
         // a new version (auto-update) refreshes it
-        let newer = arp_values("1.2.4", r"C:\Program Files\Blink\blink.exe", r"C:\Program Files\Blink", 2400);
+        let newer = arp_values("1.2.4", r"C:\Program Files\Hayate\hayate.exe", r"C:\Program Files\Hayate", 2400);
         assert_eq!(arp_refresh(&mut m, &Where::User, false, &newer), Ok(ArpOutcome::Written(Hive::User)));
         // per-user install started elevated: HKCU may be another account's, skip
         let mut e = MemArp::default();
@@ -851,7 +895,7 @@ mod tests {
         // a changed size alone makes the entry stale
         let mut g = MemArp::default();
         arp_refresh(&mut g, &Where::User, false, &v).unwrap();
-        let bigger = arp_values("1.2.3", r"C:\Program Files\Blink\blink.exe", r"C:\Program Files\Blink", 9999);
+        let bigger = arp_values("1.2.3", r"C:\Program Files\Hayate\hayate.exe", r"C:\Program Files\Hayate", 9999);
         assert_eq!(arp_refresh(&mut g, &Where::User, false, &bigger), Ok(ArpOutcome::Written(Hive::User)));
         // a write failure is an error, not a panic or a retry loop
         let mut f = MemArp { fail: true, ..Default::default() };
@@ -871,7 +915,7 @@ mod tests {
             ArpValue::Str("UninstallString", arp_uninstall_string(&exe)),
         ]
     }
-    const PF: &str = r"C:\Program Files\Blink";
+    const PF: &str = r"C:\Program Files\Hayate";
 
     #[test]
     fn legacy_blink_key_is_migrated_to_hayate() {
@@ -898,7 +942,7 @@ mod tests {
         assert_eq!(m.writes, w, "current key already right: not rewritten");
         assert!(m.user_legacy.is_empty());
         // both present and the new one stale (e.g. a crash, then an update): refreshed, legacy gone
-        let newer = arp_values("9.9.9", r"C:\Program Files\Blink\blink.exe", PF, 1);
+        let newer = arp_values("9.9.9", r"C:\Program Files\Hayate\hayate.exe", PF, 1);
         *m.lslot(Hive::User, ArpKey::Legacy) = legacy_vals(PF);
         assert_eq!(arp_refresh(&mut m, &Where::User, false, &newer), Ok(ArpOutcome::Written(Hive::User)));
         assert!(m.user_legacy.is_empty());
@@ -912,7 +956,7 @@ mod tests {
         let name = |s: &str| ArpValue::Str("DisplayName", s.into());
         for foreign in [
             legacy_vals(r"C:\Users\a\AppData\Local\Blink-Alpha"),
-            vec![name("Blink Alpha"), loc(PF), un(r#""C:\Program Files\Blink\blink.exe" --uninstall"#)],
+            vec![name("Blink Alpha"), loc(PF), un(r#""C:\Program Files\Hayate\blink.exe" --uninstall"#)],
             vec![name("Blink"), loc(PF), un(r#""C:\Other\unins000.exe""#)],
             vec![name("Blink")],
         ] {
@@ -935,7 +979,7 @@ mod tests {
         m.machine = v.clone();
         *m.lslot(Hive::User, ArpKey::Legacy) = legacy_vals(PF);
         *m.lslot(Hive::Machine, ArpKey::Legacy) = legacy_vals(PF);
-        arp_remove_all(&mut m, Hive::Machine, r"C:\Program Files\Blink\").unwrap();
+        arp_remove_all(&mut m, Hive::Machine, r"C:\Program Files\Hayate\").unwrap();
         assert!(m.machine.is_empty() && m.machine_legacy.is_empty());
         assert!(!m.user.is_empty() && !m.user_legacy.is_empty(), "per-user entries stay");
         arp_remove_all(&mut m, Hive::User, PF).unwrap();
@@ -956,22 +1000,31 @@ mod tests {
 
     #[test]
     fn uninstall_acts_only_on_the_installed_exe() {
-        let mx = r"C:\Program Files\Blink\blink.exe";
-        let ux = format!(r"{U}\blink.exe");
-        assert_eq!(uninstall_plan(&ux, U, M, false), Ok(UninstallPlan::Run));
-        assert_eq!(uninstall_plan(&ux, U, M, true), Ok(UninstallPlan::Run));
-        assert_eq!(uninstall_plan(mx, U, M, false), Ok(UninstallPlan::Elevate));
-        assert_eq!(uninstall_plan(mx, U, M, true), Ok(UninstallPlan::Run));
-        assert_eq!(uninstall_plan(&mx.to_uppercase(), U, M, true), Ok(UninstallPlan::Run));
+        let mx = r"C:\Program Files\Hayate\hayate.exe";
+        let ux = format!(r"{U}\hayate.exe");
+        let (lu, lm) = (r"C:\Users\a\AppData\Local\Programs\Blink", r"C:\Program Files\Blink");
+        let lx = format!(r"{lu}\blink.exe");
+        let lmx = format!(r"{lm}\blink.exe");
+        assert_eq!(uninstall_plan(&ux, U, M, lu, lm, false), Ok(UninstallPlan::Run));
+        assert_eq!(uninstall_plan(&ux, U, M, lu, lm, true), Ok(UninstallPlan::Run));
+        assert_eq!(uninstall_plan(mx, U, M, lu, lm, false), Ok(UninstallPlan::Elevate));
+        assert_eq!(uninstall_plan(mx, U, M, lu, lm, true), Ok(UninstallPlan::Run));
+        assert_eq!(uninstall_plan(&mx.to_uppercase(), U, M, lu, lm, true), Ok(UninstallPlan::Run));
+        // the pre-rename install of either kind is uninstallable too (docs/rename-full.md)
+        assert_eq!(uninstall_plan(&lx, U, M, lu, lm, false), Ok(UninstallPlan::Run));
+        assert_eq!(uninstall_plan(&lmx, U, M, lu, lm, false), Ok(UninstallPlan::Elevate));
+        assert_eq!(uninstall_plan(&lmx, U, M, lu, lm, true), Ok(UninstallPlan::Run));
         // refused: portable folders, sub folders, other exe names, empty known folders
-        assert!(uninstall_plan(r"C:\Users\a\Downloads\blink.exe", U, M, false).is_err());
-        assert!(uninstall_plan(r"X:\Dev\blink\target\release\blink.exe", U, M, true).is_err());
-        assert!(uninstall_plan(&format!(r"{U}\sub\blink.exe"), U, M, false).is_err());
-        assert!(uninstall_plan(r"C:\Program Files\Blink\blink-tm.exe", U, M, true).is_err());
-        assert!(uninstall_plan(r"C:\Program Files\Blink\blink.old.exe", U, M, true).is_err());
-        assert!(uninstall_plan(mx, "", "", true).is_err());
-        assert!(uninstall_plan(r"C:\Program Files\Blink\..\Evil\blink.exe", U, M, true).is_err());
-        assert!(uninstall_plan("blink.exe", U, M, true).is_err());
+        assert!(uninstall_plan(r"C:\Users\a\Downloads\hayate.exe", U, M, lu, lm, false).is_err());
+        assert!(uninstall_plan(r"C:\Users\a\Downloads\blink.exe", U, M, lu, lm, false).is_err());
+        assert!(uninstall_plan(r"C:\src\hayate\target\release\hayate.exe", U, M, lu, lm, true).is_err());
+        assert!(uninstall_plan(&format!(r"{U}\sub\hayate.exe"), U, M, lu, lm, false).is_err());
+        assert!(uninstall_plan(r"C:\Program Files\Hayate\hayate-tm.exe", U, M, lu, lm, true).is_err());
+        assert!(uninstall_plan(r"C:\Program Files\Blink\blink-tm.exe", U, M, lu, lm, true).is_err());
+        assert!(uninstall_plan(r"C:\Program Files\Hayate\hayate.old.exe", U, M, lu, lm, true).is_err());
+        assert!(uninstall_plan(mx, "", "", "", "", true).is_err());
+        assert!(uninstall_plan(r"C:\Program Files\Hayate\..\Evil\hayate.exe", U, M, lu, lm, true).is_err());
+        assert!(uninstall_plan("hayate.exe", U, M, lu, lm, true).is_err());
     }
 
     #[test]
@@ -991,23 +1044,23 @@ mod tests {
         assert!(overwrite_needs_confirm(Some("2026-11-18"), Some("2026-11-18"), false, false));
         assert!(!overwrite_needs_confirm(Some("2026-11-17"), Some("2026-11-18"), false, true));
         assert!(overwrite_needs_confirm(None, None, false, true) && !overwrite_needs_confirm(None, None, false, false));
-        assert!(done_text(&DataOutcome::Kept, Some(r"C:\Program Files\Blink")).contains(r"C:\Program Files\Blink"));
+        assert!(done_text(&DataOutcome::Kept, Some(r"C:\Program Files\Hayate")).contains(r"C:\Program Files\Hayate"));
         assert!(machine_exit_text(MI_LAUNCH_FAILED).contains("installed for everyone"));
         assert!(confirm_text(&Where::Machine).contains("everyone"));
         assert!(!confirm_text(&Where::User).contains("everyone"));
-        assert!(data_question(&Where::User, r"C:\Users\a\AppData\Local\Blink").contains(r"C:\Users\a\AppData\Local\Blink"));
-        assert!(data_question(&Where::Machine, r"C:\x\Blink").contains("other users"));
-        assert!(!data_question(&Where::User, r"C:\x\Blink").contains("other users"));
+        assert!(data_question(&Where::User, r"C:\Users\a\AppData\Local\Hayate", None).contains(r"C:\Users\a\AppData\Local\Hayate"));
+        assert!(data_question(&Where::Machine, r"C:\x\Hayate", None).contains("other users"));
+        assert!(!data_question(&Where::User, r"C:\x\Hayate", None).contains("other users"));
         assert_ne!(done_text(&DataOutcome::Deleted, None), done_text(&DataOutcome::Kept, None));
-        assert!(done_text(&DataOutcome::Failed(r"C:\x\Blink".into()), None).contains(r"C:\x\Blink"));
+        assert!(done_text(&DataOutcome::Failed(r"C:\x\Hayate".into()), None).contains(r"C:\x\Hayate"));
         assert_eq!(park_base(r"C:\Users\a\AppData\Local\"), r"C:\Users\a\AppData\Local\Temp");
-        assert_eq!(parked_exe(&park_base(r"C:\Users\a\AppData\Local"), 7), r"C:\Users\a\AppData\Local\Temp\Blink-uninstalled\blink-7.exe");
+        assert_eq!(parked_exe(&park_base(r"C:\Users\a\AppData\Local"), 7), r"C:\Users\a\AppData\Local\Temp\Hayate-uninstalled\hayate-7.exe");
     }
 
     #[test]
     fn user_text_has_no_script_hint() {
         // the Installed-apps entry and Settings never send a user to a terminal
-        for t in [confirm_text(&Where::Machine), confirm_text(&Where::User), data_question(&Where::Machine, "C:\\x\\Blink"), done_text(&DataOutcome::Deleted, None), done_text(&DataOutcome::Kept, Some("d")), done_text(&DataOutcome::Failed("d".into()), None), OVERWRITE_QUESTION.into(), INSTALL_ALL_LABEL.into(), INSTALL_ALL_HINT.into(), REPLACE_USER_SUB.into(), machine_exit_text(MI_FAILED).into()] {
+        for t in [confirm_text(&Where::Machine), confirm_text(&Where::User), data_question(&Where::Machine, "C:\\x\\Hayate", None), done_text(&DataOutcome::Deleted, None), done_text(&DataOutcome::Kept, Some("d")), done_text(&DataOutcome::Failed("d".into()), None), OVERWRITE_QUESTION.into(), INSTALL_ALL_LABEL.into(), INSTALL_ALL_HINT.into(), REPLACE_USER_SUB.into(), machine_exit_text(MI_FAILED).into()] {
             assert!(!t.contains("install.ps1") && !t.contains("terminal") && !t.contains("HKLM") && !t.contains("UAC"));
         }
     }
@@ -1022,7 +1075,7 @@ mod tests {
         assert_eq!(parse_install_machine(&["--uninstall".into()]), None);
         // only fixed flags exist: a path-looking argument changes nothing
         let mut b = install_machine_args(&Choice::default());
-        b.push(r"C:\evil\blink.exe".into());
+        b.push(r"C:\evil\hayate.exe".into());
         assert_eq!(parse_install_machine(&b), Some(Choice::default()));
         assert!(a.iter().all(|x| x.starts_with("--")));
         assert_eq!(machine_install_plan(&Where::Portable, false), Ok(MachinePlan::Elevate));
@@ -1033,14 +1086,14 @@ mod tests {
 
     #[test]
     fn toast_key_is_removed_only_when_it_points_into_the_removed_dir() {
-        let d = r"C:\Program Files\Blink";
-        assert!(clsid_ours(Some(r#""C:\Program Files\Blink\blink.exe" -ToastActivated"#), d));
-        assert!(!clsid_ours(Some(r#""C:\Users\b\AppData\Local\Programs\Blink\blink.exe" -ToastActivated"#), d));
-        assert!(!clsid_ours(Some(r#""C:\Program Files\Blink2\blink.exe" -ToastActivated"#), d));
+        let d = r"C:\Program Files\Hayate";
+        assert!(clsid_ours(Some(r#""C:\Program Files\Hayate\hayate.exe" -ToastActivated"#), d));
+        assert!(!clsid_ours(Some(r#""C:\Users\b\AppData\Local\Programs\Hayate\hayate.exe" -ToastActivated"#), d));
+        assert!(!clsid_ours(Some(r#""C:\Program Files\Hayate2\hayate.exe" -ToastActivated"#), d));
         assert!(!clsid_ours(None, d));
         // an unquoted command with a space in the path is never treated as ours
-        assert!(!clsid_ours(Some(r"c:\program files\blink\blink.exe -ToastActivated"), d));
-        assert!(clsid_ours(Some(r"C:\BLINK\blink.exe -ToastActivated"), r"c:\blink"));
+        assert!(!clsid_ours(Some(r"c:\program files\hayate\hayate.exe -ToastActivated"), d));
+        assert!(clsid_ours(Some(r"C:\HAYATE\hayate.exe -ToastActivated"), r"c:\hayate"));
     }
 
     /// install.ps1 writes the same footprint as the in-app installer.
@@ -1064,7 +1117,7 @@ mod tests {
         for l in a.iter().chain(b.iter()).chain([autostart_link()].iter()) {
             assert!(!l.description.to_lowercase().contains("blink"), "{}", l.description);
         }
-        let v = arp_values("1.0", "C:/x/blink.exe", "C:/x", 1);
+        let v = arp_values("1.0", "C:/x/hayate.exe", "C:/x", 1);
         assert!(v.iter().any(|x| matches!(x, ArpValue::Str("DisplayName", s) if s == "Hayate")));
         assert_eq!(ARP_KEY.rsplit('\\').next(), Some("Hayate"), "winget keys on the key name");
     }
@@ -1092,9 +1145,18 @@ mod tests {
         assert!(ps.contains(&format!("\"`\"$dest`\" {ARG_UNINSTALL}\"")), "install.ps1 UninstallString");
         assert!(ps.contains("Open-ArpHive ([bool]$Machine)") && ps.contains("RegistryView]::Registry64"), "install.ps1 ARP hive by -Machine, 64-bit view");
         // an all-users install drops the per-user entry and uses the all-users Startup folder, like the in-app one
-        assert!(ps.replace("\r\n", "\n").contains("if ($Machine -and -not (Test-Path (Join-Path $userDir 'blink.exe'))) {") && ps.contains("'CommonStartup'") && ps.contains("$autoDst = if ($Machine) { $autoAll }"), "install.ps1 -Machine parity");
-        // and the uninstall removes it
-        assert!(ps.contains("Remove-Arp $false $userDir") && ps.contains("if ($isAdmin) { Remove-Arp $true $machineDir }") && ps.contains("Remove-ArpLegacy ([bool]$Machine) $dir"));
+        assert!(ps.replace("\r\n", "\n").contains("if ($Machine -and -not (Test-Path (Join-Path $userDir 'hayate.exe'))) {") && ps.contains("'CommonStartup'") && ps.contains("$autoDst = if ($Machine) { $autoAll }"), "install.ps1 -Machine parity");
+        // and the uninstall removes it, for both generations of the install
+        assert!(
+            ps.contains("Remove-Arp $false $userDir")
+                && ps.contains("if ($isAdmin) {")
+                && ps.contains("Remove-Arp $true $machineDir")
+                && ps.contains("Remove-ArpLegacy ([bool]$Machine) $dir")
+                && ps.contains("Remove-ArpLegacy $false $legacyUserDir")
+                && ps.contains("Remove-ArpLegacy $true $legacyMachineDir")
+                && ps.contains("$legacyMachineDir")
+                && ps.contains("$legacyUserDir")
+        );
         // uninstall clears the Jump List the same way the in-app uninstall does
         assert!(ps.contains(crate::taskbar::logic::ARG_REMOVE), "install.ps1 jump list removal");
         // SECURITY: an elevated uninstall must never run the per-user exe (user-writable, swappable). The exe list is chosen by $isAdmin.
@@ -1103,7 +1165,7 @@ mod tests {
         let (admin_branch, user_branch) = l.split_once("} else {").expect("if/else");
         assert!(admin_branch.contains("$machineDir") && !admin_branch.contains("$userDir"), "elevated: per-machine exe only: {l}");
         assert!(user_branch.contains("$userDir") && !user_branch.contains("$machineDir"), "normal: per-user exe only: {l}");
-        // and nothing else in the script launches blink.exe with the removal arg
+        // and nothing else in the script launches hayate.exe with the removal arg
         assert_eq!(ps.matches("--remove-jumplist").count(), 1, "single launch site of --remove-jumplist");
         assert_eq!(ps.matches("Start-Process -FilePath $exe").count(), 1);
         // the startup manager's switched-off Windows entries are given back BEFORE anything is removed, by that same

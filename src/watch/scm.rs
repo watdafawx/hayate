@@ -222,6 +222,6 @@ mod tests {
         assert!(!s.is_driver());
         assert!(s.path.to_lowercase().ends_with("svchost.exe"), "{}", s.path);
         assert!(all.values().any(|s| s.is_driver()));
-        assert_eq!(read_service("NoSuchService_blink_xyz"), None);
+        assert_eq!(read_service("NoSuchService_hayate_xyz"), None);
     }
 }

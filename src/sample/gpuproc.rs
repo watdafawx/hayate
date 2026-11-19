@@ -7,7 +7,7 @@
 //! (dwm, services, elevated apps). Going through PDH instead costs ~6 MB of
 //! working set for its name tables; the D3DKMT per-process query needs
 //! PROCESS_QUERY_INFORMATION and so misses dwm and every elevated or
-//! system process when Blink runs unelevated.
+//! system process when Hayate runs unelevated.
 //!
 //! Cost: one PerfQueryCounterData call per tick (~1 ms for ~1300 instances),
 //! only while the Processes tab shows a GPU column.

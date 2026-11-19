@@ -1,9 +1,9 @@
-//! Self-install from blink.exe (no separate installer) and the toast click
+//! Self-install from hayate.exe (no separate installer) and the toast click
 //! handler it registers.
 //!
-//! * A copy running anywhere but `%LOCALAPPDATA%\Programs\Blink` (or an
+//! * A copy running anywhere but `%LOCALAPPDATA%\Programs\Hayate` (or an
 //!   install.ps1 -Machine dir) is portable: it works as always and shows a
-//!   dismissible bar inside its window offering "Install Blink". Nothing is
+//!   dismissible bar inside its window offering "Install Hayate". Nothing is
 //!   written before the user clicks Install in the panel.
 //! * Install copies the running exe (+ version.txt), writes the Start-menu
 //!   shortcuts (app ID, toast activator CLSID, icon), optionally the Startup
@@ -12,11 +12,11 @@
 //!   window closes and `finish` starts the installed copy (through UAC when
 //!   "Run as administrator by default" was ticked; on cancel, unelevated).
 //! * Uninstall (Settings) removes the same items, all in this process: a
-//!   running exe cannot be deleted but can be renamed, so blink.exe first
-//!   moves to `%TEMP%\Blink-uninstalled\blink-<pid>.exe` (deleted by the next
-//!   Blink start, or Storage Sense); then the install dir goes, and the data
+//!   running exe cannot be deleted but can be renamed, so hayate.exe first
+//!   moves to `%TEMP%\Hayate-uninstalled\hayate-<pid>.exe` (deleted by the next
+//!   Hayate start, or Storage Sense); then the install dir goes, and the data
 //!   dir (when ticked) once the window has closed. No helper process, no
-//!   cmd.exe, no reboot-pending key: see the Defender review notes, Self-install.
+//!   cmd.exe, no reboot-pending key: see docs/defender.md, Self-install.
 //! * Installs also write an Installed-apps entry (Settings > Apps): `HKCU` or
 //!   (install.ps1 -Machine) `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hayate`,
 //!   `UninstallString` = `"<exe>" --uninstall`. That start (`uninstall_cli`, also
@@ -24,9 +24,9 @@
 //!   runs the same `uninstall`; an all-users install is first handed to UAC.
 //!   An older install gets the entry on its next normal start (`refresh_arp`).
 //! * `-ToastActivated` (COM, a click in the notification centre): see
-//!   `activator`; the event goes to the running Blink or Blink starts on Watch.
+//!   `activator`; the event goes to the running Hayate or Hayate starts on Watch.
 //!
-//! install.ps1 writes the same footprint (see the Defender review notes, Self-install).
+//! install.ps1 writes the same footprint (see docs/defender.md, Self-install).
 
 pub mod logic;
 mod activator;
@@ -49,11 +49,11 @@ pub struct Status {
     pub at: Where,
     pub exe: String,
     pub exe_dir: String,
-    /// `%LOCALAPPDATA%\Programs\Blink`
+    /// `%LOCALAPPDATA%\Programs\Hayate`
     pub install_dir: String,
-    /// auto-update source offered by default (a publish folder), if any
+    /// auto-update source offered by default (a publish.ps1 folder), if any
     pub update_source: Option<String>,
-    /// an installed blink.exe (per-user or per-machine) exists: no offer bar
+    /// an installed hayate.exe (per-user or per-machine) exists: no offer bar
     pub installed: Option<String>,
 }
 
@@ -65,22 +65,33 @@ static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
 enum Pending {
     Launch { exe: PathBuf, restore: Restore, admin: bool },
-    /// uninstall done: delete this data dir (when asked) after the window, then say so
-    /// (data dir to delete, install folder that survived the removal)
-    Removed(Option<String>, Option<String>),
+    /// uninstall done: delete these data dirs (when asked) after the window, then say so
+    /// (data dirs to delete, install folder that survived the removal)
+    Removed(Option<Vec<String>>, Option<String>),
 }
 
-/// `<LocalAppData>\Programs\Blink` from the known folder (never `%LOCALAPPDATA%`).
+/// `<LocalAppData>\Programs\Hayate` from the known folder (never `%LOCALAPPDATA%`).
 pub fn user_dir() -> String {
-    known_folder(&FOLDERID_LocalAppData).map(|p| p.join(r"Programs\Blink").to_string_lossy().into_owned()).unwrap_or_default()
+    known_folder(&FOLDERID_LocalAppData).map(|p| p.join(r"Programs\Hayate").to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 fn machine_dir() -> String {
-    known_folder(&FOLDERID_ProgramFiles).map(|p| p.join("Blink").to_string_lossy().into_owned()).unwrap_or_default()
+    known_folder(&FOLDERID_ProgramFiles).map(|p| p.join("Hayate").to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// This is the per-user installed copy (`%LOCALAPPDATA%\Programs\Blink\blink.exe`): the only copy that
-/// writes or changes Blink's Startup shortcut from the Startup tab.
+/// `%LOCALAPPDATA%\Programs\Blink`: the per-user install folder of the
+/// pre-rename build (recognised by `status`, the migration and `--uninstall`).
+pub fn legacy_user_dir() -> String {
+    local_app_data().map(|p| crate::rename::logic::legacy_user_install(&p)).unwrap_or_default()
+}
+
+/// `%ProgramFiles%\Blink`: the all-users install folder of the pre-rename build.
+pub fn legacy_machine_dir() -> String {
+    program_files().map(|p| crate::rename::logic::legacy_machine_install(&p)).unwrap_or_default()
+}
+
+/// This is the per-user installed copy (`%LOCALAPPDATA%\Programs\Hayate\hayate.exe`): the only copy that
+/// writes or changes Hayate's Startup shortcut from the Startup tab.
 pub fn per_user_installed() -> bool {
     status().at == Where::User
 }
@@ -100,10 +111,14 @@ pub fn status() -> &'static Status {
         let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
         let exe_dir = osutil::parent_dir(&exe).to_string();
         let install_dir = user_dir();
-        let at = classify(&exe_dir, &install_dir, &machine_dir());
+        let md = machine_dir();
+        let at = classify_any(&exe_dir, &install_dir, &md, &legacy_user_dir(), &legacy_machine_dir());
         let has = |n: &str| Path::new(&exe_dir).join(n).is_file();
-        let update_source = update_default(&exe_dir, has("blink.exe.sha256"), has("version.txt"), &install_dir);
-        let installed = [install_dir.clone(), machine_dir()].into_iter().filter(|d| !d.is_empty()).find(|d| Path::new(d).join("blink.exe").is_file());
+        let update_source = update_default(&exe_dir, has("hayate.exe.sha256"), has("version.txt"), &install_dir);
+        let installed = [install_dir.clone(), md, legacy_user_dir(), legacy_machine_dir()]
+            .into_iter()
+            .filter(|d| !d.is_empty())
+            .find(|d| Path::new(d).join("hayate.exe").is_file() || Path::new(d).join("blink.exe").is_file());
         Status { at, exe, exe_dir, install_dir, update_source, installed }
     })
 }
@@ -167,14 +182,14 @@ pub fn start_watch() -> Option<u64> {
     START_WATCH.get().copied().flatten()
 }
 
-/// The running Blink to hand a start to: one running from this exe first (a
-/// BLINK_MULTI test copy next to others), else the user's normal one (never
+/// The running Hayate to hand a start to: one running from this exe first (a
+/// HAYATE_MULTI test copy next to others), else the user's normal one (never
 /// for a test instance). Not this process.
 pub fn find_running() -> Option<HWND> {
     let me = norm(&status().exe);
     let mut any = None;
     let mut mine = None;
-    for (class, normal) in [(w!("BlinkMain"), true), (w!("BlinkMainMulti"), false)] {
+    for (class, normal) in [(w!("HayateMain"), true), (w!("HayateMainMulti"), false)] {
         let mut prev: Option<HWND> = None;
         loop {
             let Ok(h) = (unsafe { FindWindowExW(None, prev, class, None) }) else { break };
@@ -197,7 +212,7 @@ pub fn find_running() -> Option<HWND> {
     mine.or(any)
 }
 
-/// Toast launch with Blink already running: post `msg` (wp 1, lp event id) to
+/// Toast launch with Hayate already running: post `msg` (wp 1, lp event id) to
 /// that window and return true (this process then exits).
 pub fn forward(msg: u32) -> bool {
     let Some(id) = start_watch() else { return false };
@@ -206,7 +221,7 @@ pub fn forward(msg: u32) -> bool {
         let _ = AllowSetForegroundWindow(ASFW_ANY);
         let _ = PostMessageW(Some(h), msg, WPARAM(1), LPARAM(id as isize));
     }
-    log(&format!("setup: toast click forwarded to the running Blink (event {id})"));
+    log(&format!("setup: toast click forwarded to the running Hayate (event {id})"));
     true
 }
 
@@ -216,20 +231,20 @@ fn norm(p: &str) -> String {
 
 // ---- install -----------------------------------------------------------------
 
-/// Private args that carry a test environment (BLINK_DATA_DIR / BLINK_MULTI)
+/// Private args that carry a test environment (HAYATE_DATA_DIR / HAYATE_MULTI)
 /// into starts that do not inherit ours (COM, UAC).
 fn env_args() -> Vec<String> {
     relaunch_args(&[], &env_restore())
 }
 
-/// BLINK_DATA_DIR / BLINK_MULTI of this process as a `Restore` (UAC and
+/// HAYATE_DATA_DIR / HAYATE_MULTI of this process as a `Restore` (UAC and
 /// Explorer starts lose the environment; `update::env_from_args` puts it back).
 pub fn env_restore() -> Restore {
-    Restore { data_dir: std::env::var("BLINK_DATA_DIR").ok().filter(|d| !d.is_empty()), multi: osutil::multi(), ..Default::default() }
+    Restore { data_dir: crate::osutil::env_var("DATA_DIR").ok().filter(|d| !d.is_empty()), multi: osutil::multi(), ..Default::default() }
 }
 
 /// Run `f` on a fresh STA thread (shell links are apartment COM objects).
-fn on_sta<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> Option<R> {
+pub(crate) fn on_sta<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> Option<R> {
     std::thread::spawn(move || unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         let r = f();
@@ -257,11 +272,11 @@ pub fn install(c: Choice, restore: Restore) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// `machine`: the all-users install (elevated process): `%ProgramFiles%\Blink`, the common Start menu,
+/// `machine`: the all-users install (elevated process): `%ProgramFiles%\Hayate`, the common Start menu,
 /// the HKLM Installed-apps entry, the all-users Startup folder. Same layout and values as install.ps1 -Machine.
 fn do_install(exe: &str, dir: &str, c: Choice, src: Option<&str>, machine: bool) -> std::result::Result<PathBuf, String> {
     let d = Path::new(dir);
-    let dest = d.join("blink.exe");
+    let dest = d.join("hayate.exe");
     if machine {
         if dir.is_empty() || dir != machine_dir() {
             return Err("Unusual install folder: nothing was installed.".into());
@@ -269,7 +284,7 @@ fn do_install(exe: &str, dir: &str, c: Choice, src: Option<&str>, machine: bool)
         // the source is the running exe: a regular file we can read, never a link
         let m = std::fs::symlink_metadata(exe).map_err(|e| format!("Cannot read {exe}: {e}"))?;
         if !m.is_file() || std::os::windows::fs::MetadataExt::file_attributes(&m) & 0x400 != 0 {
-            return Err("This copy of blink.exe is not a plain file: nothing was installed.".into());
+            return Err("This copy of hayate.exe is not a plain file: nothing was installed.".into());
         }
         std::fs::File::open(exe).map_err(|e| format!("Cannot read {exe}: {e}"))?;
         // an existing folder must already be admin-only (not a link, no user write)
@@ -280,14 +295,14 @@ fn do_install(exe: &str, dir: &str, c: Choice, src: Option<&str>, machine: bool)
     std::fs::create_dir_all(d).map_err(|e| format!("Cannot create {dir}: {e}"))?;
     copy_exe_atomic(exe, d, &dest, dir)?;
     log(&format!("setup: copied {exe} -> {}", dest.display()));
-    // version.txt (the publish step) travels with the exe; leftovers of a self-update go
+    // version.txt (publish.ps1) travels with the exe; leftovers of a self-update go
     let ver = Path::new(osutil::parent_dir(exe)).join("version.txt");
     if ver.is_file() {
         let _ = std::fs::copy(&ver, d.join("version.txt"));
     } else {
         let _ = std::fs::remove_file(d.join("version.txt"));
     }
-    for f in ["blink.old.exe", "blink.new.exe", "blink.bad.exe", "blink.new.version.txt", "version.old.txt"] {
+    for f in ["hayate.old.exe", "hayate.new.exe", "hayate.bad.exe", "hayate.new.version.txt", "version.old.txt"] {
         let _ = std::fs::remove_file(d.join(f));
     }
     // shortcuts
@@ -328,10 +343,10 @@ fn do_install(exe: &str, dir: &str, c: Choice, src: Option<&str>, machine: bool)
     match RealArp.write(hive, ArpKey::Current, &arp_vals(dir)) {
         Ok(()) => {
             log(&format!(r"setup: {hive:?} {ARP_KEY} written (Installed apps)"));
-            // the pre-rename `Blink` key of this install goes now (only when it is ours)
+            // the pre-rename `Hayate` key of this install goes now (only when it is ours)
             match arp_drop_legacy(&mut RealArp, hive, dir) {
                 Ok(true) => {}
-                Ok(false) => log("setup: a foreign Uninstall Blink key was left alone"),
+                Ok(false) => log("setup: a foreign Uninstall Hayate key was left alone"),
                 Err(e) => log(&format!("setup: legacy Installed-apps entry not removed: {e}")),
             }
         }
@@ -339,7 +354,7 @@ fn do_install(exe: &str, dir: &str, c: Choice, src: Option<&str>, machine: bool)
         Err(e) => log(&format!("setup: Installed-apps entry not written: {e}")),
     }
     if machine {
-        crate::taskmgr::verify_admin_only(&dest.to_string_lossy(), true).map_err(|e| format!("The installed blink.exe is not protected: {e}"))?;
+        crate::taskmgr::verify_admin_only(&dest.to_string_lossy(), true).map_err(|e| format!("The installed hayate.exe is not protected: {e}"))?;
     }
     Ok(dest)
 }
@@ -359,14 +374,14 @@ fn file_hash(f: &mut std::fs::File) -> std::io::Result<u64> {
     }
 }
 
-/// Copy the source exe through ONE open handle to `blink.new.exe` beside the target, check the
-/// copy has the same content as that handle, then rename it over `blink.exe`. A live install is
+/// Copy the source exe through ONE open handle to `hayate.new.exe` beside the target, check the
+/// copy has the same content as that handle, then rename it over `hayate.exe`. A live install is
 /// never truncated in place: a failed copy leaves the old exe as it was.
-fn copy_exe_atomic(exe: &str, d: &Path, dest: &Path, dir: &str) -> std::result::Result<(), String> {
+pub(crate) fn copy_exe_atomic(exe: &str, d: &Path, dest: &Path, dir: &str) -> std::result::Result<(), String> {
     use std::io::Seek;
-    let tmp = d.join("blink.new.exe");
+    let tmp = d.join("hayate.new.exe");
     let _ = std::fs::remove_file(&tmp);
-    let fail = |e: String| format!("Cannot copy blink.exe to {dir}: {e}. If an installed Hayate is running, exit it from its tray menu first.");
+    let fail = |e: String| format!("Cannot copy hayate.exe to {dir}: {e}. If an installed Hayate is running, exit it from its tray menu first.");
     let mut src = std::fs::File::open(exe).map_err(|e| fail(e.to_string()))?;
     let want = {
         let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(|e| fail(e.to_string()))?;
@@ -402,10 +417,10 @@ fn write_autostart(exe: &Path, common: bool) -> std::result::Result<PathBuf, Str
     Ok(startup)
 }
 
-/// The Startup tab's "Start Blink with Windows": the same shortcut write as the
+/// The Startup tab's "Start Hayate with Windows": the same shortcut write as the
 /// installer's option, for the per-user installed copy that is running. Any other
 /// copy is refused (a portable one would point the shortcut at wherever it happens to
-/// sit; a per-machine one is set up by install.ps1), and so is an elevated Blink or
+/// sit; a per-machine one is set up by install.ps1), and so is an elevated Hayate or
 /// one that cannot tell: the Startup folder is user-writable and an elevated process
 /// does not write there on its own. Call from the I/O worker, after the user's click.
 pub fn enable_autostart() -> std::result::Result<(), String> {
@@ -516,18 +531,43 @@ impl ArpStore for RealArp {
 /// The entry's values for the install in `dir`.
 fn arp_vals(dir: &str) -> Vec<ArpValue> {
     let dir = dir.trim_end_matches(['\\', '/']);
-    let exe = format!("{dir}\\blink.exe");
+    let exe = format!("{dir}\\hayate.exe");
     let kb = std::fs::metadata(&exe).map(|m| (m.len() / 1024).min(u32::MAX as u64) as u32).unwrap_or(0);
     arp_values(env!("CARGO_PKG_VERSION"), &exe, dir, kb)
 }
 
-/// A normal start of an installed blink.exe: write the Installed-apps entry
+/// The migration's Installed-apps step: an existing entry of ours that still
+/// names the pre-rename folder is pointed at the new one. Never creates an
+/// entry that was not there (an elevated start as another admin account must
+/// not leave a bogus Hayate entry behind) and never touches a foreign one.
+pub(crate) fn arp_after_move(at: &Where, dir: &str) -> Option<String> {
+    // same rule as `arp_refresh`: an elevated process may be another admin account
+    if *at == Where::User && osutil::is_elevated() {
+        return None;
+    }
+    let h = arp_hive(at)?;
+    let mut store = RealArp;
+    let cur = store.read_str(h, ArpKey::Current, "InstallLocation")?;
+    if crate::update::logic::norm_path(&cur) == crate::update::logic::norm_path(dir) {
+        return None;
+    }
+    let ours = store.read_str(h, ArpKey::Current, "DisplayName").is_some_and(|n| n == crate::osutil::APP_NAME);
+    if !ours {
+        return None;
+    }
+    match store.write(h, ArpKey::Current, &arp_vals(dir)) {
+        Ok(()) => Some(format!("Installed-apps entry now names {dir} ({h:?})")),
+        Err(e) => Some(format!("Installed-apps entry not updated: {e}")),
+    }
+}
+
+/// A normal start of an installed hayate.exe: write the Installed-apps entry
 /// when it is missing or stale and this process may write it (HKCU from a
 /// normal one, HKLM only when already elevated; no UAC from here, ever).
-/// Test copies (BLINK_MULTI) and blink-tm.exe never write it.
+/// Test copies (HAYATE_MULTI) and hayate-tm.exe never write it.
 fn refresh_arp() {
     let s = status();
-    if osutil::multi() || !is_blink_exe(&s.exe) || arp_hive(&s.at).is_none() {
+    if osutil::multi() || !is_hayate_exe(&s.exe) || arp_hive(&s.at).is_none() {
         return;
     }
     let (at, dir, elevated) = (s.at.clone(), s.exe_dir.clone(), osutil::is_elevated());
@@ -541,12 +581,12 @@ fn refresh_arp() {
 /// A normal start of an installed copy: shortcuts written before the Hayate
 /// rename are renamed (or dropped when the new one exists). Best effort, no UAC:
 /// the install's own menu (the all-users menu only from an elevated start) and,
-/// for an all-users install, this account's own menu too (legacy `Blink*.lnk`
+/// for an all-users install, this account's own menu too (legacy `Hayate*.lnk`
 /// that start our exe; that menu is the user's to write). Failures are only
 /// logged. Runs off the start path (shell links need an STA thread).
 fn migrate_menu_links() {
     let s = status();
-    if osutil::multi() || !is_blink_exe(&s.exe) {
+    if osutil::multi() || !is_hayate_exe(&s.exe) {
         return;
     }
     let exe = s.exe.clone();
@@ -577,24 +617,81 @@ fn migrate_menu_links() {
     });
 }
 
+/// The target of a .lnk (needs an STA thread).
+pub(crate) fn link_target(link: &Path) -> Option<String> {
+    if !link.exists() {
+        return None;
+    }
+    unsafe {
+        let sl = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let pf = sl.cast::<IPersistFile>().ok()?;
+        pf.Load(&HSTRING::from(link.as_os_str()), STGM_READ).ok()?;
+        let mut buf = [0u16; 1024];
+        sl.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
+        let n = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+}
+
+/// Point an existing .lnk at `target` (keeping its other properties), optionally
+/// replacing the app ID and the toast activator. Needs an STA thread.
+pub(crate) fn rewrite_link(path: &Path, target: &Path, app_id: Option<&str>, toast: bool) -> Result<()> {
+    use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    let t = HSTRING::from(target.as_os_str());
+    let dir = HSTRING::from(target.parent().map(|p| p.as_os_str()).unwrap_or_default());
+    unsafe {
+        let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+        let pf: IPersistFile = sl.cast()?;
+        pf.Load(&HSTRING::from(path.as_os_str()), STGM_READWRITE)?;
+        sl.SetPath(&t)?;
+        sl.SetWorkingDirectory(&dir)?;
+        sl.SetIconLocation(&t, 0)?;
+        let ps: IPropertyStore = sl.cast()?;
+        if let Some(id) = app_id {
+            let w = wide(id);
+            let v = RawPv { vt: 31 /* VT_LPWSTR */, r: [0; 3], p: w.as_ptr() as *const _, _pad: std::ptr::null() };
+            ps.SetValue(&pkey(5), &v as *const RawPv as *const PROPVARIANT)?;
+        }
+        if toast {
+            let g = GUID::from_u128(CLSID);
+            let v = RawPv { vt: 72 /* VT_CLSID */, r: [0; 3], p: &g as *const GUID as *const _, _pad: std::ptr::null() };
+            ps.SetValue(&pkey(26), &v as *const RawPv as *const PROPVARIANT)?;
+        }
+        ps.Commit()?;
+        pf.Save(&HSTRING::from(path.as_os_str()), true)?;
+        let p = HSTRING::from(path.as_os_str());
+        SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, Some(p.as_ptr() as *const _), None);
+    }
+    Ok(())
+}
+
+/// Copy `src` to `dst` (a fresh .lnk) with its target and icon pointing at
+/// `target`; every other property (arguments, flags) is kept. Needs an STA thread.
+pub(crate) fn clone_link_as(src: &Path, dst: &Path, target: &Path) -> Result<()> {
+    let t = HSTRING::from(target.as_os_str());
+    let dir = HSTRING::from(target.parent().map(|p| p.as_os_str()).unwrap_or_default());
+    let _ = std::fs::remove_file(dst);
+    unsafe {
+        let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+        let pf: IPersistFile = sl.cast()?;
+        pf.Load(&HSTRING::from(src.as_os_str()), STGM_READ)?;
+        sl.SetPath(&t)?;
+        sl.SetWorkingDirectory(&dir)?;
+        sl.SetIconLocation(&t, 0)?;
+        pf.Save(&HSTRING::from(dst.as_os_str()), true)?;
+        let p = HSTRING::from(dst.as_os_str());
+        SHChangeNotify(SHCNE_CREATE, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, Some(p.as_ptr() as *const _), None);
+    }
+    Ok(())
+}
+
 /// The target of a .lnk is `exe` (case-insensitive). Needs an STA thread.
 fn link_points_at(link: &Path, exe: &str) -> bool {
     if !link.exists() || norm(exe).is_empty() {
         return false;
     }
-    unsafe {
-        let Ok(sl) = CoCreateInstance::<_, IShellLinkW>(&ShellLink, None, CLSCTX_INPROC_SERVER) else { return false };
-        let Ok(pf) = sl.cast::<IPersistFile>() else { return false };
-        if pf.Load(&HSTRING::from(link.as_os_str()), STGM_READ).is_err() {
-            return false;
-        }
-        let mut buf = [0u16; 1024];
-        if sl.GetPath(&mut buf, std::ptr::null_mut(), 0).is_err() {
-            return false;
-        }
-        let n = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
-        norm(&String::from_utf16_lossy(&buf[..n])).eq_ignore_ascii_case(&norm(exe))
-    }
+    link_target(link).is_some_and(|t| norm(&t).eq_ignore_ascii_case(&norm(exe)))
 }
 
 /// Default value of `HKCU\<key>`.
@@ -620,7 +717,8 @@ fn reg_set(key: &str, value: &str) -> std::result::Result<(), String> {
     }
 }
 
-fn known_folder(id: &GUID) -> Option<PathBuf> {
+/// A shell known folder (STA not required). Shared with `rename` (taskbar pins).
+pub(crate) fn known_folder(id: &GUID) -> Option<PathBuf> {
     unsafe {
         let p = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
         let s = p.to_string().ok();
@@ -630,15 +728,20 @@ fn known_folder(id: &GUID) -> Option<PathBuf> {
 }
 
 /// `(LocalAppData, RoamingAppData, Profile)` of the token's user from the Known Folder API,
-/// never from the environment (the Task Manager launcher builds a cold-started Blink's
+/// never from the environment (the Task Manager launcher builds a cold-started Hayate's
 /// environment from these).
 pub fn user_folders() -> Option<(String, String, String)> {
     let g = |id: &GUID| known_folder(id).map(|p| p.to_string_lossy().into_owned());
     Some((g(&FOLDERID_LocalAppData)?, g(&FOLDERID_RoamingAppData)?, g(&FOLDERID_Profile)?))
 }
 
+/// `%APPDATA%` from the shell's known-folder API.
+pub fn roaming_app_data() -> Option<String> {
+    known_folder(&FOLDERID_RoamingAppData).map(|p| p.to_string_lossy().into_owned())
+}
+
 /// `%ProgramFiles(x86)%` / `%ProgramData%` from the Known Folder API (the cold-started
-/// Blink's environment is built from these, never from the caller's).
+/// Hayate's environment is built from these, never from the caller's).
 pub fn program_files_x86() -> Option<String> {
     known_folder(&FOLDERID_ProgramFilesX86).map(|p| p.to_string_lossy().into_owned())
 }
@@ -686,7 +789,7 @@ pub fn set_jumplist(on: bool) {
 
 /// A fresh .lnk (like install.ps1's New-Link): target, args, working dir,
 /// icon = the exe's first icon, app ID, optional runas flag and activator.
-fn write_link(path: &Path, target: &Path, l: &Link) -> Result<()> {
+pub(crate) fn write_link(path: &Path, target: &Path, l: &Link) -> Result<()> {
     use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
     let _ = std::fs::remove_file(path);
@@ -729,34 +832,47 @@ fn write_link(path: &Path, target: &Path, l: &Link) -> Result<()> {
 
 // ---- uninstall ---------------------------------------------------------------
 
-/// Settings > Uninstall Blink (per-user install only), all in this process:
+/// Settings > Uninstall Hayate (per-user install only), all in this process:
 /// the running exe moves out to %TEMP% (`logic::parked_exe`), then the
 /// shortcuts, the activator key, update.ini and the install dir go. The data
 /// dir (when `remove_data`) goes in `finish`, after the window has saved its
 /// state. Ok: close the window. Err: nothing was removed.
 pub fn uninstall(remove_data: bool) -> std::result::Result<(), String> {
     let s = status();
-    // which install this exe belongs to (never a path from anywhere else), and what that means here
+    // which install this exe belongs to (never a path from anywhere else), and what that means here.
+    // `dir` is where the exe really runs from: the current folder, or the pre-rename one.
     let (dir, menu_id, hive) = match s.at {
-        Where::User => (s.install_dir.clone(), FOLDERID_Programs, Hive::User),
+        Where::User => (s.exe_dir.clone(), FOLDERID_Programs, Hive::User),
         Where::Machine => {
             if !osutil::is_elevated() {
                 return Err("Removing Hayate for all users needs administrator rights.".into());
             }
-            (machine_dir(), FOLDERID_CommonPrograms, Hive::Machine)
+            (s.exe_dir.clone(), FOLDERID_CommonPrograms, Hive::Machine)
         }
         Where::Portable => return Err("Only an installed Hayate can uninstall itself".into()),
     };
-    if !is_blink_exe(&s.exe) {
-        return Err("Only the installed blink.exe can uninstall Hayate".into());
+    if !is_installed_exe(&s.exe) {
+        return Err("Only the installed hayate.exe (or the pre-rename blink.exe) can uninstall Hayate".into());
     }
     if !safe_to_remove(&dir) {
         return Err(format!("Unusual install path {dir}: delete it by hand"));
     }
     let data = osutil::data_dir().to_string_lossy().into_owned();
     let data_ok = remove_data && data_dir_removable(&data, &dir);
-    log(&format!("setup: uninstall clicked (remove data: {remove_data}{})", if remove_data && !data_ok { ", but the data dir is not Blink's own: kept" } else { "" }));
-    // BEFORE anything is removed: give every Windows startup entry Blink switched off back. Blink's copy of
+    // the pre-rename settings folder goes too when the user asked for the settings to go
+    let legacy_data = local_app_data().map(|la| format!(r"{la}\{}", crate::rename::logic::LEGACY_DIR)).filter(|p| Path::new(p).is_dir());
+    let legacy_ok = remove_data && legacy_data.as_ref().is_some_and(|p| legacy_data_dir_removable(p, &dir) && norm(p) != norm(&data));
+    let mut gone: Vec<String> = Vec::new();
+    if data_ok {
+        gone.push(data.clone());
+    }
+    if legacy_ok {
+        if let Some(p) = &legacy_data {
+            gone.push(p.clone());
+        }
+    }
+    log(&format!("setup: uninstall clicked (remove data: {remove_data}{})", if remove_data && !data_ok { ", but the data dir is not Hayate's own: kept" } else { "" }));
+    // BEFORE anything is removed: give every Windows startup entry Hayate switched off back. Hayate's copy of
     // the original is the only record of what to restore; once the exe/data are gone the user would be left
     // with entries disabled by a program that no longer exists. Any failure = remove nothing.
     match crate::startup::run::release_all_owned() {
@@ -772,7 +888,7 @@ pub fn uninstall(remove_data: bool) -> std::result::Result<(), String> {
             return Err(e);
         }
     }
-    // a Blink of this install that sits in the tray holds the folder too
+    // a Hayate of this install that sits in the tray holds the folder too
     quit_running_copies_of(&s.exe);
     // then the one step that can fail: a running exe cannot be deleted, only renamed
     let temp = park_root().ok_or("The Local AppData folder was not found. Nothing was removed.")?;
@@ -781,8 +897,8 @@ pub fn uninstall(remove_data: bool) -> std::result::Result<(), String> {
     if osutil::reparse_in_chain(Path::new(osutil::parent_dir(&parked))) {
         return Err("The folder for the removed copy is a link, so it is not used. Nothing was removed.".into());
     }
-    std::fs::rename(&s.exe, &parked).map_err(|e| format!("Cannot move the running blink.exe out of {dir}: {e}. Nothing was removed."))?;
-    log(&format!("setup: running exe moved to {parked} (deleted at the next Blink start)"));
+    std::fs::rename(&s.exe, &parked).map_err(|e| format!("Cannot move the running hayate.exe out of {dir}: {e}. Nothing was removed."))?;
+    log(&format!("setup: running exe moved to {parked} (deleted at the next Hayate start)"));
     let machine = s.at == Where::Machine;
     let own_exe = s.exe.clone();
     let removed = on_sta(move || {
@@ -804,7 +920,8 @@ pub fn uninstall(remove_data: bool) -> std::result::Result<(), String> {
                 }
             }
         }
-        // this account's Startup link, and (all-users install) the all-users one; other users' are theirs
+        // this account's Startup link, and (all-users install) the all-users one; other users' are theirs.
+        // A pre-rename `Blink.lnk` goes too when it starts the exe being removed.
         for common in [false, true] {
             if common && !machine {
                 continue;
@@ -812,6 +929,10 @@ pub fn uninstall(remove_data: bool) -> std::result::Result<(), String> {
             if let Some(st) = startup_folder(common) {
                 if std::fs::remove_file(st.join(LINK_AUTO)).is_ok() {
                     out.push(st.join(LINK_AUTO).display().to_string());
+                }
+                let old = st.join(crate::rename::logic::LEGACY_STARTUP_LINK);
+                if old.exists() && link_points_at(&old, &own_exe) && std::fs::remove_file(&old).is_ok() {
+                    out.push(old.display().to_string());
                 }
             }
         }
@@ -844,8 +965,9 @@ pub fn uninstall(remove_data: bool) -> std::result::Result<(), String> {
         Ok(()) => log(&format!("setup: removed {dir}")),
         Err(e) => log(&format!("setup: could not remove {dir}: {e}")),
     }
+    cleanup_legacy_launcher();
     let left = Path::new(&dir).exists().then(|| dir.clone());
-    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending::Removed(data_ok.then_some(data), left));
+    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending::Removed((!gone.is_empty()).then_some(gone), left));
     Ok(())
 }
 
@@ -855,15 +977,15 @@ fn park_root() -> Option<String> {
     known_folder(&FOLDERID_LocalAppData).map(|p| park_base(&p.to_string_lossy()))
 }
 
-/// Ask a Blink of this very exe (tray, hidden) to quit, wait a few seconds.
+/// Ask a Hayate of this very exe (tray, hidden) to quit, wait a few seconds.
 /// Only a process of the same or lower integrity gets the message; an
 /// elevated one stays (the exe can still be renamed under it).
 fn quit_running_copies_of(exe: &str) {
     let me = norm(exe);
-    // every Blink window (normal and test class) running exactly this image, not this process
+    // every Hayate window (normal and test class) running exactly this image, not this process
     let same = || {
         let mut found: Vec<HWND> = Vec::new();
-        for class in [w!("BlinkMain"), w!("BlinkMainMulti")] {
+        for class in [w!("HayateMain"), w!("HayateMainMulti")] {
             let mut prev: Option<HWND> = None;
             loop {
                 let Ok(h) = (unsafe { FindWindowExW(None, prev, class, None) }) else { break };
@@ -889,18 +1011,18 @@ fn quit_running_copies_of(exe: &str) {
             let _ = PostMessageW(Some(*h), crate::win::quit_msg(), WPARAM(0), LPARAM(0));
         }
     }
-    log(&format!("setup: asked {} running Blink(s) of this install to quit", first.len()));
+    log(&format!("setup: asked {} running Hayate(s) of this install to quit", first.len()));
     for _ in 0..12 {
         std::thread::sleep(std::time::Duration::from_millis(250));
         if same().is_empty() {
             return;
         }
     }
-    log("setup: that Blink is still running; continuing (the exe is only renamed)");
+    log("setup: that Hayate is still running; continuing (the exe is only renamed)");
 }
 
-/// Delete exes parked by an earlier uninstall (`<LocalAppData>\Temp\Blink-uninstalled`).
-/// Off the UI thread; only `blink-<pid>.exe` names; a still-running one
+/// Delete exes parked by an earlier uninstall (`<LocalAppData>\Temp\Hayate-uninstalled`).
+/// Off the UI thread; only `hayate-<pid>.exe` names; a still-running one
 /// just stays for next time.
 fn sweep_parked() {
     let Some(root) = park_root() else { return };
@@ -943,14 +1065,14 @@ fn message_box_titled(owner: Option<HWND>, text: &str, title: &str, style: MESSA
     unsafe { MessageBoxW(owner, pcw(&t), pcw(&c), style | MB_SETFOREGROUND) }
 }
 
-/// "Uninstall Blink" with native boxes: confirm, then "also delete settings and
+/// "Uninstall Hayate" with native boxes: confirm, then "also delete settings and
 /// history?", then the Task Manager redirect gate and `uninstall`. An all-users
 /// install without admin rights is handed to UAC first (same exe, `--uninstall`
 /// only), and the questions are asked there. Only ever acts on the install this
 /// exe is running from (`uninstall_plan`).
 pub fn uninstall_flow(owner: Option<HWND>) -> Flow {
     let s = status();
-    match uninstall_plan(&s.exe, &user_dir(), &machine_dir(), osutil::is_elevated()) {
+    match uninstall_plan(&s.exe, &user_dir(), &machine_dir(), &legacy_user_dir(), &legacy_machine_dir(), osutil::is_elevated()) {
         Err(e) => return Flow::Failed(e),
         Ok(UninstallPlan::Elevate) => {
             // never the caller's data dir / multi flag: the elevated copy uses its own known-folder data dir
@@ -972,7 +1094,7 @@ pub fn uninstall_flow(owner: Option<HWND>) -> Flow {
         log("setup: uninstall: not confirmed");
         return Flow::Cancelled;
     }
-    let dir = if s.at == Where::Machine { machine_dir() } else { s.install_dir.clone() };
+    let dir = s.exe_dir.clone();
     let data = osutil::data_dir().to_string_lossy().into_owned();
     // the settings folder belongs to the elevated account: when UAC was answered with another admin's
     // credentials it is not the requester's, so it is neither offered nor touched
@@ -981,7 +1103,10 @@ pub fn uninstall_flow(owner: Option<HWND>) -> Flow {
     if !same {
         log("setup: uninstall: the elevated account is not the one that asked; settings and history are kept");
     }
-    let remove_data = same && data_dir_removable(&data, &dir) && message_box(owner, &data_question(&s.at, &data), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+    let remove_data = same && data_dir_removable(&data, &dir) && {
+        let legacy = local_app_data().map(|la| format!(r"{la}\{}", crate::rename::logic::LEGACY_DIR)).filter(|p| Path::new(p).is_dir() && legacy_data_dir_removable(p, &dir));
+        message_box(owner, &data_question(&s.at, &data, legacy.as_deref()), MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES
+    };
     // a Task Manager redirect that is on goes off first (UAC); declined: nothing is removed
     match crate::taskmgr::uninstall_gate().and_then(|()| uninstall(remove_data)) {
         // the "removed" box comes from `finish`, after the settings folder is dealt with
@@ -990,7 +1115,7 @@ pub fn uninstall_flow(owner: Option<HWND>) -> Flow {
     }
 }
 
-/// `blink.exe --uninstall` (the Installed-apps entry): no window, no tray, no
+/// `hayate.exe --uninstall` (the Installed-apps entry): no window, no tray, no
 /// single-instance check; the boxes above, then exit. True when this process
 /// was started that way.
 pub fn uninstall_cli() -> bool {
@@ -1019,12 +1144,12 @@ pub fn uninstall_cli() -> bool {
 /// A copy installed just for this user exists (the panel then offers to replace it).
 pub fn user_install_exists() -> bool {
     let d = user_dir();
-    !d.is_empty() && Path::new(&d).join("blink.exe").is_file()
+    !d.is_empty() && Path::new(&d).join("hayate.exe").is_file()
 }
 
 /// The window's click: ask UAC for this very exe with the fixed `--install-machine` flags (no
 /// path arguments: the elevated copy installs itself), wait for it. `Ok(true)`: installed, and
-/// the elevated copy has started the installed Blink; `Ok(false)`: UAC was cancelled.
+/// the elevated copy has started the installed Hayate; `Ok(false)`: UAC was cancelled.
 fn install_all(c: Choice) -> std::result::Result<bool, String> {
     let s = status();
     machine_install_plan(&s.at, osutil::is_elevated())?;
@@ -1073,8 +1198,8 @@ pub fn take_install_all_result() -> Option<std::result::Result<bool, String>> {
     IA_RESULT.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
-/// `blink.exe --install-machine ...`: the elevated half. No window, no tray; copies itself to
-/// `%ProgramFiles%\Blink`, writes the all-users entries, starts the installed copy unelevated and
+/// `hayate.exe --install-machine ...`: the elevated half. No window, no tray; copies itself to
+/// `%ProgramFiles%\Hayate`, writes the all-users entries, starts the installed copy unelevated and
 /// exits with `MI_*`. True when this process was started that way (it never returns then).
 pub fn install_machine_cli() -> bool {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -1109,7 +1234,7 @@ fn pre_state(dir: &str) -> Pre {
     let menu = known_folder(&FOLDERID_CommonPrograms);
     Pre {
         dir: Path::new(dir).exists(),
-        exe: Path::new(dir).join("blink.exe").exists(),
+        exe: Path::new(dir).join("hayate.exe").exists(),
         arp: RealArp.read_str(Hive::Machine, ArpKey::Current, "InstallLocation").is_some(),
         links: all_menu_links().filter(|n| menu.as_ref().is_some_and(|m| m.join(n).exists())).collect(),
         startup: startup_folder(true).is_some_and(|s| s.join(LINK_AUTO).exists()),
@@ -1124,7 +1249,7 @@ fn run_machine_install(c: &Choice, wait_pid: Option<u32>, requester: Option<Stri
         return MI_FAILED;
     }
     let pre = pre_state(&dir);
-    let dest_exe = Path::new(&dir).join("blink.exe");
+    let dest_exe = Path::new(&dir).join("hayate.exe");
     if pre.exe {
         // an all-users copy is there: replacing it with one that is not newer needs an explicit Yes
         let same = std::fs::File::open(&s.exe).and_then(|mut a| file_hash(&mut a)).ok().zip(std::fs::File::open(&dest_exe).and_then(|mut b| file_hash(&mut b)).ok()).is_some_and(|(a, b)| a == b);
@@ -1193,8 +1318,8 @@ fn rollback_machine(dir: &str, pre: &Pre) {
     if !pre.dir && safe_to_remove(dir) && !osutil::reparse_in_chain(Path::new(dir)) {
         let _ = std::fs::remove_dir_all(dir);
     } else if !pre.exe {
-        let _ = std::fs::remove_file(Path::new(dir).join("blink.exe"));
-        let _ = std::fs::remove_file(Path::new(dir).join("blink.new.exe"));
+        let _ = std::fs::remove_file(Path::new(dir).join("hayate.exe"));
+        let _ = std::fs::remove_file(Path::new(dir).join("hayate.new.exe"));
     }
 }
 
@@ -1202,8 +1327,8 @@ fn rollback_machine(dir: &str, pre: &Pre) {
 /// shortcuts, Installed-apps entry and folder. Settings and history stay.
 fn remove_user_install() {
     let dir = user_dir();
-    let exe = format!(r"{dir}\blink.exe");
-    if dir.is_empty() || !safe_to_remove(&dir) || !is_blink_exe(&exe) || osutil::reparse_in_chain(Path::new(&dir)) {
+    let exe = format!(r"{dir}\hayate.exe");
+    if dir.is_empty() || !safe_to_remove(&dir) || !is_hayate_exe(&exe) || osutil::reparse_in_chain(Path::new(&dir)) {
         log(&format!("setup: the per-user copy in {dir} was left alone (unusual path)"));
         return;
     }
@@ -1294,26 +1419,56 @@ pub fn finish() {
             // delete and exit at once so nothing recreates the folder
             let outcome = match data {
                 None => DataOutcome::Kept,
-                Some(dir) => {
-                    log(&format!("setup: removing the data dir {dir}"));
+                Some(dirs) => {
                     crate::bgio::flush(std::time::Duration::from_millis(1500));
-                    for _ in 0..10 {
-                        if std::fs::remove_dir_all(&dir).is_ok() || !Path::new(&dir).exists() {
-                            break;
+                    let mut failed = None;
+                    for dir in dirs {
+                        log(&format!("setup: removing the data dir {dir}"));
+                        for _ in 0..10 {
+                            if std::fs::remove_dir_all(&dir).is_ok() || !Path::new(&dir).exists() {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(200));
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        if Path::new(&dir).exists() {
+                            log(&format!("setup: the data dir {dir} could not be deleted"));
+                            failed = failed.or(Some(dir));
+                        }
                     }
-                    if Path::new(&dir).exists() {
-                        log(&format!("setup: the data dir {dir} could not be deleted"));
-                        DataOutcome::Failed(dir)
-                    } else {
-                        DataOutcome::Deleted
+                    match failed {
+                        Some(dir) => DataOutcome::Failed(dir),
+                        None => DataOutcome::Deleted,
                     }
                 }
             };
             message_box(None, &done_text(&outcome, left.as_deref()), MB_OK | MB_ICONINFORMATION);
             std::process::exit(0);
         }
+    }
+}
+
+/// Leftovers of the pre-rename Task Manager launcher (`%ProgramFiles%\Blink\blink-tm*.exe`).
+/// Called after the redirect gate turned the redirect off. Best effort; the names are
+/// ours, but only an elevated process may delete them.
+fn cleanup_legacy_launcher() {
+    let Some(pf) = program_files() else { return };
+    let d = Path::new(&pf).join(crate::rename::logic::LEGACY_DIR);
+    if !d.is_dir() {
+        return;
+    }
+    if !osutil::is_elevated() {
+        log(&format!("setup: pre-rename launcher files in {} need an elevated uninstall", d.display()));
+        return;
+    }
+    for n in [crate::rename::logic::LEGACY_LAUNCHER, "blink-tm.old.exe", "blink-tm.new.exe"] {
+        let f = d.join(n);
+        if f.exists() && std::fs::remove_file(&f).is_err() {
+            log(&format!("setup: could not delete {}", f.display()));
+        }
+    }
+    let _ = std::fs::remove_file(d.join(".coldstart.lock"));
+    if std::fs::read_dir(&d).map(|mut r| r.next().is_none()).unwrap_or(false) {
+        let _ = std::fs::remove_dir(&d);
     }
 }
 
@@ -1324,7 +1479,7 @@ fn launch(exe: &Path, mut restore: Restore, admin: bool) {
     let elevated = osutil::is_elevated();
     if admin && !elevated {
         // runas goes through the AppInfo service: our environment does not carry over
-        restore.data_dir = std::env::var("BLINK_DATA_DIR").ok().filter(|d| !d.is_empty());
+        restore.data_dir = crate::osutil::env_var("DATA_DIR").ok().filter(|d| !d.is_empty());
         restore.multi = osutil::multi();
         let mut args = relaunch_args(&[], &restore);
         args.extend(["--wait-pid".into(), pid.clone()]);

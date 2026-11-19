@@ -1,32 +1,32 @@
-//! Hands-off in-place updating from a local drop folder (the publish step output).
+//! Hands-off in-place updating from a local drop folder (publish.ps1 output).
 //!
-//! Opt-in: `%LOCALAPPDATA%\Blink\update.ini` (written by install.ps1) names a
+//! Opt-in: `%LOCALAPPDATA%\Hayate\update.ini` (written by install.ps1) names a
 //! `source` folder and the `install_dir`. Only a copy running from
-//! `install_dir\blink.exe` updates itself; dev builds never do.
+//! `install_dir\hayate.exe` updates itself; dev builds never do.
 //!
 //! * check: every 60 s the UI timer queues one thread-pool job (never on the
 //!   UI thread, never two at once). Unchanged source = one GetFileAttributesExW
-//!   on `blink.exe.sha256`.
-//! * stage: a new sha256 → copy `blink.exe` to `<install>\blink.new.exe`,
+//!   on `hayate.exe.sha256`.
+//! * stage: a new sha256 → copy `hayate.exe` to `<install>\hayate.new.exe`,
 //!   hash it (BCrypt SHA-256), keep it only when it matches.
 //! * apply (UI thread, on the timer): window hidden or 2 min without input →
-//!   rename blink.exe → blink.old.exe, blink.new.exe → blink.exe, close.
+//!   rename hayate.exe → hayate.old.exe, hayate.new.exe → hayate.exe, close.
 //! * relaunch (`finish`, after the message loop ended and features shut down):
-//!   CreateProcessW of the new blink.exe with the same args (+ window state),
+//!   CreateProcessW of the new hayate.exe with the same args (+ window state),
 //!   inheriting this token. This process then waits as a watchdog: if the new
 //!   one exits (or never marks itself ready) within ~40 s, it is rolled back:
-//!   blink.exe → blink.bad.exe, blink.old.exe → blink.exe, relaunch the old one,
+//!   hayate.exe → hayate.bad.exe, hayate.old.exe → hayate.exe, relaunch the old one,
 //!   and that build is never staged again.
 //!
-//! Elevated Blink (trust boundary): the source folder is writable by every
+//! Elevated Hayate (trust boundary): the source folder is writable by every
 //! unelevated process of the user, and a matching .sha256 proves integrity,
-//! not who made the file. So an elevated Blink never hands its token to a new
+//! not who made the file. So an elevated Hayate never hands its token to a new
 //! build. It stages and verifies as above, then only offers
 //! "Update ready · <sha> · restart" in the status bar. Nothing is swapped at
 //! idle / hidden moments. On click it swaps the files and asks UAC for the new
 //! exe: `runas` from an elevated process would skip the prompt, so Explorer
 //! starts this build unelevated as a helper (`--update-elevate`), which
-//! ShellExecuteExW("runas")s the new blink.exe and reports the pid (or the
+//! ShellExecuteExW("runas")s the new hayate.exe and reports the pid (or the
 //! cancel) in `update-uac.txt`. The old instance then watches that pid exactly
 //! like above. Cancel / failure / no answer: the files go back, this build is
 //! relaunched (it is the one the user elevated), nothing is marked bad.
@@ -68,17 +68,21 @@ struct Paths {
     ver: PathBuf,
     new_ver: PathBuf,
     old_ver: PathBuf,
+    /// the source build this process stages (new or pre-rename drop name)
+    src_exe: PathBuf,
+    src_sha: PathBuf,
+    src_ver: PathBuf,
 }
 
 impl Paths {
-    fn src_exe(&self) -> PathBuf {
-        self.source.join("blink.exe")
+    fn src_exe(&self) -> &Path {
+        &self.src_exe
     }
-    fn src_sha(&self) -> PathBuf {
-        self.source.join("blink.exe.sha256")
+    fn src_sha(&self) -> &Path {
+        &self.src_sha
     }
-    fn src_ver(&self) -> PathBuf {
-        self.source.join("version.txt")
+    fn src_ver(&self) -> &Path {
+        &self.src_ver
     }
 }
 
@@ -103,10 +107,10 @@ struct Inner {
     source_ok: Option<bool>,
     /// install dir not writable (per-machine install, not elevated): stop trying
     write_failed: bool,
-    /// leftovers (blink.old.exe ...) removed
+    /// leftovers (hayate.old.exe ...) removed
     cleaned: bool,
     locked_logged: bool,
-    /// trial run not yet marked ready: keep blink.old.exe for the watchdog
+    /// trial run not yet marked ready: keep hayate.old.exe for the watchdog
     trial_pending: bool,
     /// (text, until unix, ok)
     note: Option<(String, u64, bool)>,
@@ -179,8 +183,8 @@ fn load() -> Ctx {
         None
     };
     let paths = (|| {
-        // a BLINK_MULTI dev instance updates only with its own explicit data dir (test machine runs)
-        if osutil::multi() && std::env::var_os("BLINK_DATA_DIR").is_none() {
+        // a HAYATE_MULTI dev instance updates only with its own explicit data dir (rig tests)
+        if osutil::multi() && crate::osutil::env_var_os("DATA_DIR").is_none() {
             return off("");
         }
         let text = std::fs::read_to_string(osutil::data_dir().join("update.ini")).ok()?;
@@ -188,30 +192,41 @@ fn load() -> Ctx {
         let source = cfg.source.filter(|_| cfg.enabled)?;
         let exe = std::env::current_exe().ok()?;
         let dir = exe.parent()?.to_path_buf();
-        let install = cfg.install_dir.unwrap_or_else(|| {
-            std::env::var("LOCALAPPDATA").map(|l| format!("{l}\\Programs\\Blink")).unwrap_or_default()
+        let installed = cfg.install_dir.clone().unwrap_or_else(|| {
+            std::env::var("LOCALAPPDATA").map(|l| format!("{l}\\Programs\\Hayate")).unwrap_or_default()
         });
-        if !same_dir(&dir.to_string_lossy(), &install) {
-            return off(&format!("running from {}, installed copy is in {install}", dir.display()));
-        }
-        if !exe.file_name().is_some_and(|n| n.eq_ignore_ascii_case("blink.exe")) {
-            return off(&format!("exe is {}, not blink.exe", exe.display()));
-        }
+        let la = crate::setup::local_app_data().unwrap_or_else(|| std::env::var("LOCALAPPDATA").unwrap_or_default());
+        let pf = crate::setup::program_files().unwrap_or_default();
+        let Some(kind) = install_layout(&exe.to_string_lossy(), &installed, &la, &pf) else {
+            return off(&format!("running from {}, installed copy is in {installed}", dir.display()));
+        };
+        let n = names(kind);
+        let has = |f: &str| Path::new(&source).join(f).is_file();
+        let Some((src_exe, src_sha)) = source_names(kind, has("hayate.exe"), has("blink.exe")) else {
+            return off(&format!("source {source} has no {} + .sha256 for the {:?} install", n.exe, kind));
+        };
         // also through junctions / 8.3 names / `..`: compare the resolved paths too
         let real = |s: &str| std::fs::canonicalize(s).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| s.to_string());
-        if let Err(why) = source_allowed(&source, &install).and_then(|_| source_allowed(&real(&source), &real(&install))) {
+        if let Err(why) = source_allowed(&source, &installed)
+            .and_then(|_| source_allowed(&source, &dir.to_string_lossy()))
+            .and_then(|_| source_allowed(&real(&source), &real(&installed)))
+            .and_then(|_| source_allowed(&real(&source), &real(&dir.to_string_lossy())))
+        {
             return off(&format!("{why} ({source})"));
         }
-        let j = |n: &str| dir.join(n);
+        let j = |f: &str| dir.join(f);
         Some(Paths {
-            source: PathBuf::from(source),
-            exe: j("blink.exe"),
-            new_exe: j("blink.new.exe"),
-            old_exe: j("blink.old.exe"),
-            bad_exe: j("blink.bad.exe"),
+            source: PathBuf::from(&source),
+            exe: j(n.exe),
+            new_exe: j(n.new_exe),
+            old_exe: j(n.old_exe),
+            bad_exe: j(n.bad_exe),
             ver: j("version.txt"),
-            new_ver: j("blink.new.version.txt"),
-            old_ver: j("version.old.txt"),
+            new_ver: j(n.new_ver),
+            old_ver: j(n.old_ver),
+            src_exe: PathBuf::from(&source).join(src_exe),
+            src_sha: PathBuf::from(&source).join(src_sha),
+            src_ver: PathBuf::from(&source).join("version.txt"),
             dir,
         })
     })();
@@ -223,21 +238,21 @@ fn mode() -> Apply {
 }
 
 /// First thing in main: an elevated relaunch (UAC path) went through Explorer
-/// and lost our environment; restore BLINK_DATA_DIR / BLINK_MULTI from its
+/// and lost our environment; restore HAYATE_DATA_DIR / HAYATE_MULTI from its
 /// private args before anything reads them.
 pub fn env_from_args() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = parse_restore(&args);
     if let Some(d) = r.data_dir {
-        std::env::set_var("BLINK_DATA_DIR", d);
+        std::env::set_var("HAYATE_DATA_DIR", d);
     }
     if r.multi {
-        std::env::set_var("BLINK_MULTI", "1");
+        std::env::set_var("HAYATE_MULTI", "1");
     }
 }
 
 /// `--update-elevate` helper mode (unelevated, started through Explorer by an
-/// elevated Blink): ask UAC to start the swapped-in blink.exe, write the
+/// elevated Hayate): ask UAC to start the swapped-in hayate.exe, write the
 /// outcome for the waiting old instance, exit. Returns true in helper mode.
 pub fn helper() -> bool {
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -249,13 +264,13 @@ pub fn helper() -> bool {
             log(&format!("update helper: cannot write {}: {e}", h.result));
         }
     };
-    // only ever blink.exe next to this helper (the install dir)
+    // only ever hayate.exe next to this helper (the install dir)
     let exe = PathBuf::from(&h.exe);
     let here = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
-    let ok = exe.file_name().is_some_and(|n| n.eq_ignore_ascii_case("blink.exe"))
+    let ok = exe.file_name().is_some_and(|n| layout_exe_name(&n.to_string_lossy()))
         && here.zip(exe.parent()).is_some_and(|(a, b)| same_dir(&a.to_string_lossy(), &b.to_string_lossy()));
     if !ok {
-        log(&format!("update helper: refusing {} (not blink.exe next to the helper)", h.exe));
+        log(&format!("update helper: refusing {} (not an installed exe next to the helper)", h.exe));
         report(&Uac::Failed(87));
         return true;
     }
@@ -442,7 +457,7 @@ pub fn on_timer(hwnd: HWND, id: usize, tab: usize) -> bool {
     }
 }
 
-/// Elevated Blink with a verified build staged: the status bar offers "restart".
+/// Elevated Hayate with a verified build staged: the status bar offers "restart".
 pub fn offer() -> bool {
     paths().is_some() && mode() == Apply::Ask && INNER.try_lock().ok().is_some_and(|g| g.as_ref().is_some_and(|i| i.staged.is_some()))
 }
@@ -597,7 +612,7 @@ fn check_source() {
     });
     let Some(a) = a else {
         if was_ok != Some(false) {
-            log(&format!("update: source {} not reachable (no blink.exe.sha256); will keep checking", p.source.display()));
+            log(&format!("update: source {} not reachable (no {}); will keep checking", p.source.display(), file(p.src_sha())));
         }
         return;
     };
@@ -609,7 +624,7 @@ fn check_source() {
     }
     let remember = || inner(|i| i.last_attrs = Some(a));
     let Some(src_sha) = std::fs::read_to_string(p.src_sha()).ok().and_then(|t| parse_sha_file(&t)) else {
-        log("update: blink.exe.sha256 in the source is not a sha256; ignored until it changes");
+        log(&format!("update: {} in the source is not a sha256; ignored until it changes", file(p.src_sha())));
         return remember();
     };
     if let Err(e) = ensure_current(p) {
@@ -648,7 +663,7 @@ fn ensure_current(p: &Paths) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Copy the source build to blink.new.exe, verify it and mark it staged.
+/// Copy the source build to hayate.new.exe, verify it and mark it staged.
 /// Err((remember, why)): nothing staged; `remember` = do not look at this
 /// source write again until it changes (hash mismatch).
 fn stage_build(p: &Paths, src_sha: &str, a: (u64, u64)) -> std::result::Result<(), (bool, String)> {
@@ -658,7 +673,7 @@ fn stage_build(p: &Paths, src_sha: &str, a: (u64, u64)) -> std::result::Result<(
     let t0 = std::time::Instant::now();
     if let Err(e) = std::fs::copy(p.src_exe(), &p.new_exe) {
         let denied = e.kind() == std::io::ErrorKind::PermissionDenied;
-        log(&format!("update: copy to {} failed: {e}{}", p.new_exe.display(), if denied { " (install dir not writable: auto-update needs the per-user install or an elevated Blink; stopped)" } else { "" }));
+        log(&format!("update: copy to {} failed: {e}{}", p.new_exe.display(), if denied { " (install dir not writable: auto-update needs the per-user install or an elevated Hayate; stopped)" } else { "" }));
         if denied {
             inner(|i| i.write_failed = true);
         }
@@ -673,8 +688,8 @@ fn stage_build(p: &Paths, src_sha: &str, a: (u64, u64)) -> std::result::Result<(
         }
         Err(e) => {
             let _ = delete(&p.new_exe);
-            log(&format!("update: cannot hash blink.new.exe: {e}"));
-            return Err((false, format!("cannot hash blink.new.exe: {e}")));
+            log(&format!("update: cannot hash hayate.new.exe: {e}"));
+            return Err((false, format!("cannot hash hayate.new.exe: {e}")));
         }
     }
     if src_ver.is_some() {
@@ -688,11 +703,11 @@ fn stage_build(p: &Paths, src_sha: &str, a: (u64, u64)) -> std::result::Result<(
     });
     let ms = t0.elapsed().as_millis();
     if mode() == Apply::Ask {
-        log(&format!("update: staged {lbl} as blink.new.exe ({ms} ms, hash ok); elevated: offered in the status bar, starts only on click, through UAC"));
+        log(&format!("update: staged {lbl} as hayate.new.exe ({ms} ms, hash ok); elevated: offered in the status bar, starts only on click, through UAC"));
         repaint();
         return Ok(());
     }
-    log(&format!("update: staged {lbl} as blink.new.exe ({ms} ms, hash ok); swaps in when the window is hidden or after 2 min idle"));
+    log(&format!("update: staged {lbl} as hayate.new.exe ({ms} ms, hash ok); swaps in when the window is hidden or after 2 min idle"));
     // look for a good moment now instead of on the next 60 s tick (hidden: swaps in right away)
     tick_now();
     Ok(())
@@ -789,7 +804,7 @@ fn manual_run() -> std::result::Result<String, String> {
         i.source_ok = Some(a.is_some());
     });
     let a = a.ok_or_else(|| format!("source not reachable ({})", p.source.display()))?;
-    let src_sha = std::fs::read_to_string(p.src_sha()).ok().and_then(|t| parse_sha_file(&t)).ok_or("blink.exe.sha256 in the source is not a sha256")?;
+    let src_sha = std::fs::read_to_string(p.src_sha()).ok().and_then(|t| parse_sha_file(&t)).ok_or_else(|| format!("{} in the source is not a sha256", file(p.src_sha())))?;
     ensure_current(p).map_err(|e| format!("cannot hash the running exe: {e}"))?;
     let src_ver = std::fs::read_to_string(p.src_ver()).ok().map(|t| parse_version(&t));
     let lbl = label(src_ver.as_ref(), &src_sha);
@@ -856,7 +871,7 @@ fn try_apply(hwnd: HWND, tab: usize, clicked: bool) -> bool {
     let Some((sha, lbl)) = inner(|i| i.staged.clone()) else { return false };
     // the staged file must still be the verified one
     if !exists(&p.new_exe) {
-        log("update: blink.new.exe vanished; staging again");
+        log("update: hayate.new.exe vanished; staging again");
         inner(|i| {
             i.staged = None;
             i.last_attrs = None;
@@ -871,7 +886,7 @@ fn try_apply(hwnd: HWND, tab: usize, clicked: bool) -> bool {
         match sha256_file(&p.new_exe) {
             Ok(h) if h == sha => {}
             r => {
-                log(&format!("update: blink.new.exe changed since it was verified ({r:?}); dropped, staging again"));
+                log(&format!("update: hayate.new.exe changed since it was verified ({r:?}); dropped, staging again"));
                 let _ = delete(&p.new_exe);
                 inner(|i| {
                     i.staged = None;
@@ -899,10 +914,10 @@ fn try_apply(hwnd: HWND, tab: usize, clicked: bool) -> bool {
     });
     let maximized = unsafe { IsZoomed(hwnd).as_bool() };
 
-    // swap files: blink.exe (running image; rename is allowed) → blink.old.exe
+    // swap files: hayate.exe (running image; rename is allowed) → hayate.old.exe
     if exists(&p.old_exe) {
         if let Err(e) = delete(&p.old_exe) {
-            log(&format!("update: cannot apply yet, blink.old.exe in use ({e})"));
+            log(&format!("update: cannot apply yet, hayate.old.exe in use ({e})"));
             return false;
         }
     }
@@ -911,7 +926,7 @@ fn try_apply(hwnd: HWND, tab: usize, clicked: bool) -> bool {
         return false;
     }
     if let Err(e) = rename(&p.new_exe, &p.exe, false) {
-        log(&format!("update: apply failed: {e}; putting blink.exe back"));
+        log(&format!("update: apply failed: {e}; putting hayate.exe back"));
         if let Err(e2) = rename(&p.old_exe, &p.exe, false) {
             log(&format!("update: restore failed too: {e2}"));
         }
@@ -935,7 +950,7 @@ fn try_apply(hwnd: HWND, tab: usize, clicked: bool) -> bool {
     let mut restore = Restore { trial: Some(sha), show: Some(show), tab: Some(tab), place, maximized, ..Default::default() };
     if uac {
         // that start goes through Explorer + UAC: carry the test environment as args
-        restore.data_dir = std::env::var("BLINK_DATA_DIR").ok().filter(|d| !d.is_empty());
+        restore.data_dir = crate::osutil::env_var("DATA_DIR").ok().filter(|d| !d.is_empty());
         restore.multi = osutil::multi();
     }
     *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending { restore, label: lbl.clone(), uac });
@@ -961,7 +976,7 @@ fn spawn(exe: &Path, args: &[String]) -> std::result::Result<PROCESS_INFORMATION
     let dir = wide(&exe.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
     let si = STARTUPINFOW { cb: std::mem::size_of::<STARTUPINFOW>() as u32, ..Default::default() };
     let mut pi = PROCESS_INFORMATION::default();
-    // same token as this process: an elevated Blink restarts elevated, a normal one normal
+    // same token as this process: an elevated Hayate restarts elevated, a normal one normal
     unsafe { CreateProcessW(pcw(&app), Some(windows::core::PWSTR(cmd.as_mut_ptr())), None, None, false, PROCESS_CREATION_FLAGS(0), None, pcw(&dir), &si, &mut pi) }
         .map_err(|e| e.message())?;
     unsafe {
@@ -1043,8 +1058,8 @@ pub fn finish() {
     }
 }
 
-/// blink.exe (failed build) → blink.bad.exe, blink.old.exe (this running
-/// image) → blink.exe, never stage that build again, relaunch the old one.
+/// hayate.exe (failed build) → hayate.bad.exe, hayate.old.exe (this running
+/// image) → hayate.exe, never stage that build again, relaunch the old one.
 fn rollback(p: &Paths, restore: &Restore, sha: &str, lbl: &str) {
     let mut ok = true;
     for (a, b) in [(&p.exe, &p.bad_exe), (&p.old_exe, &p.exe)] {
@@ -1068,14 +1083,14 @@ fn rollback(p: &Paths, restore: &Restore, sha: &str, lbl: &str) {
     st.rolled_back_at = now_unix();
     save_state(&st);
     if !ok && !exists(&p.exe) {
-        log("update: rollback could not restore blink.exe; not relaunching");
+        log("update: rollback could not restore hayate.exe; not relaunching");
         return;
     }
     relaunch_current(p, restore, &format!("rolled back; previous build relaunched ({lbl} marked bad)"));
 }
 
-/// Start blink.exe again with this process's token (rollback / undo). Elevated:
-/// only when blink.exe really is the build this instance runs, so a failed
+/// Start hayate.exe again with this process's token (rollback / undo). Elevated:
+/// only when hayate.exe really is the build this instance runs, so a failed
 /// rename can never start the new build with our token.
 fn relaunch_current(p: &Paths, restore: &Restore, what: &str) {
     if mode() == Apply::Ask {
@@ -1083,7 +1098,7 @@ fn relaunch_current(p: &Paths, restore: &Restore, what: &str) {
         match sha256_file(&p.exe) {
             Ok(h) if !cur.is_empty() && h == cur => {}
             r => {
-                log(&format!("update: blink.exe is not this build ({r:?}); not relaunching it elevated"));
+                log(&format!("update: hayate.exe is not this build ({r:?}); not relaunching it elevated"));
                 return;
             }
         }
@@ -1111,8 +1126,8 @@ fn uac_file() -> PathBuf {
     osutil::data_dir().join("update-uac.txt")
 }
 
-/// Elevated path: Explorer starts this build (now blink.old.exe) unelevated
-/// as the helper; the helper asks UAC to start the new blink.exe and writes
+/// Elevated path: Explorer starts this build (now hayate.old.exe) unelevated
+/// as the helper; the helper asks UAC to start the new hayate.exe and writes
 /// the answer. Returns the new build's process (verified image) and pid.
 fn start_via_uac(p: &Paths, args: &[String]) -> std::result::Result<(HANDLE, u32), UacEnd> {
     let result = uac_file();
@@ -1144,7 +1159,7 @@ fn start_via_uac(p: &Paths, args: &[String]) -> std::result::Result<(HANDLE, u32
     };
     let _ = std::fs::remove_file(&result);
     // the answer sits in a user-writable file: only watch (and maybe
-    // terminate) that pid when it really is the new blink.exe
+    // terminate) that pid when it really is the new hayate.exe
     unsafe {
         let h = match OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, false, pid) {
             Ok(h) => h,
@@ -1171,8 +1186,8 @@ fn start_via_uac(p: &Paths, args: &[String]) -> std::result::Result<(HANDLE, u32
 }
 
 /// The UAC-gated start did not happen (cancelled, failed, no answer): put
-/// this build back as blink.exe and keep running it. The new build is not
-/// bad: it goes back to blink.new.exe and stays offered.
+/// this build back as hayate.exe and keep running it. The new build is not
+/// bad: it goes back to hayate.new.exe and stays offered.
 fn undo(p: &Paths, restore: &Restore, lbl: &str, why: &str) {
     log(&format!("update: {lbl} not started ({why}); keeping the current build"));
     let mut ok = true;

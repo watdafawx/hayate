@@ -1,5 +1,5 @@
 //! Pure parts of the taskbar access: the launch intents a Jump List task (or a
-//! Nilesoft Shell menu item) starts Blink with, the task definitions, when the
+//! Nilesoft Shell menu item) starts Hayate with, the task definitions, when the
 //! Jump List is (re)written, and the Nilesoft snippet. No I/O, so all of it is
 //! unit-tested; `taskbar::mod` does the COM and file work.
 
@@ -21,7 +21,7 @@ pub enum Intent {
     Open,
     /// bring it up on a tab (`Tab::restore_id`)
     Tab(usize),
-    /// restart elevated: UAC, asked by Blink itself
+    /// restart elevated: UAC, asked by Hayate itself
     RestartAdmin,
 }
 
@@ -47,10 +47,10 @@ pub fn parse_intent(args: &[String]) -> Option<Intent> {
     args.iter().any(|a| a == ARG_OPEN).then_some(Intent::Open)
 }
 
-/// The window message a second instance posts to the running Blink
-/// (`BlinkShowWindow`): wparam 0 open, 1 is the toast click, 2 tab (lparam =
+/// The window message a second instance posts to the running Hayate
+/// (`HayateShowWindow`): wparam 0 open, 1 is the toast click, 2 tab (lparam =
 /// restore id). That message is let through the integrity filter (an elevated
-/// Blink must hear an unelevated launcher), so ANY process can post it, with no
+/// Hayate must hear an unelevated launcher), so ANY process can post it, with no
 /// way to tell who sent it: it may therefore only ever show the window or pick a
 /// tab. `--restart-admin` has NO wire form: the process that was launched with
 /// it asks UAC itself (`taskbar::restart_admin`), so no posted message can ever
@@ -73,7 +73,7 @@ pub fn from_wire(wp: usize, lp: isize) -> Option<Intent> {
 
 // ---- tasks ---------------------------------------------------------------------
 
-/// One Jump List task: a shell link to blink.exe with these arguments.
+/// One Jump List task: a shell link to hayate.exe with these arguments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Task {
     pub title: &'static str,
@@ -171,15 +171,15 @@ pub enum Plan {
 /// May this process touch the global Jump List of its app ID at all, to write
 /// OR to remove it? `test` is the debug-build test AUMID: a disposable
 /// identity, so that copy may register itself anywhere. Otherwise only an
-/// installed, non-`BLINK_MULTI` copy owns the real `Blink.TaskManager` list: a
-/// portable copy (a dev build, a test machine worktree) or a test instance did not write
+/// installed, non-`HAYATE_MULTI` copy owns the real `Hayate.TaskManager` list: a
+/// portable copy (a dev build, a rig worktree) or a test instance did not write
 /// it, so it must not delete the installed copy's list either.
 pub fn eligible(at: &Where, multi: bool, test: bool) -> Result<(), &'static str> {
     if test {
         return Ok(());
     }
     if multi {
-        return Err("test instance (BLINK_MULTI)");
+        return Err("test instance (HAYATE_MULTI)");
     }
     if *at == Where::Portable {
         return Err("portable copy: nothing written or removed outside it");
@@ -205,8 +205,8 @@ pub fn plan(at: &Where, enabled: bool, multi: bool, test: bool, st: &State, fp: 
 // ---- admin launch ----------------------------------------------------------------
 
 /// Arguments of the elevated copy a `--restart-admin` start asks UAC for: UAC
-/// drops the environment, so BLINK_DATA_DIR / BLINK_MULTI travel as the private
-/// args; shown in front. `replace` is the pid of the running unelevated Blink it
+/// drops the environment, so HAYATE_DATA_DIR / HAYATE_MULTI travel as the private
+/// args; shown in front. `replace` is the pid of the running unelevated Hayate it
 /// replaces (`--wait-pid`: the elevated copy asks it to quit and waits for it).
 /// Never contains `--restart-admin` (no prompt loop) and nothing a user typed.
 pub fn elevate_args(data_dir: Option<String>, multi: bool, replace: Option<u32>) -> Vec<String> {
@@ -220,17 +220,17 @@ pub fn elevate_args(data_dir: Option<String>, multi: bool, replace: Option<u32>)
 /// What `--restart-admin` does in the process it launched, from what it finds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdminRoute {
-    /// no Blink is running: UAC for a fresh elevated one
+    /// no Hayate is running: UAC for a fresh elevated one
     ElevateNew,
-    /// an unelevated Blink is running: UAC for an elevated one that replaces it
+    /// an unelevated Hayate is running: UAC for an elevated one that replaces it
     /// (the running one is left alone until UAC is accepted)
     ElevateReplace(u32),
-    /// the running Blink is elevated already, or its token cannot be read: no
+    /// the running Hayate is elevated already, or its token cannot be read: no
     /// prompt, just show it
     Show,
 }
 
-/// `running`: the pid of a running Blink and whether its token is elevated
+/// `running`: the pid of a running Hayate and whether its token is elevated
 /// (None = could not tell).
 pub fn admin_route(running: Option<(u32, Option<bool>)>) -> AdminRoute {
     match running {
@@ -284,7 +284,7 @@ fn bad_chars(p: &str) -> String {
 }
 
 /// Why `p` cannot go into the snippet, as text the user can act on. `what`
-/// names the path ("The path of blink.exe", "Blink's data folder").
+/// names the path ("The path of hayate.exe", "Hayate's data folder").
 fn path_problem(what: &str, p: &str, fix: &str) -> String {
     if p.is_empty() {
         return format!("{what} is empty. {fix}");
@@ -295,31 +295,31 @@ fn path_problem(what: &str, p: &str, fix: &str) -> String {
 /// Check BOTH paths a saved snippet depends on, before anything is written:
 /// `exe` goes into the menu items, `import_file` is the path the user must put
 /// in `import '...'` in shell.nss (the saved snippet inside the data dir, which
-/// `BLINK_DATA_DIR` can move anywhere). Ok: the snippet text.
+/// `HAYATE_DATA_DIR` can move anywhere). Ok: the snippet text.
 pub fn nilesoft_save(exe: &str, import_file: &str) -> Result<String, String> {
     let text = nilesoft_snippet(exe)?;
     if !nilesoft_path_ok(import_file) {
         return Err(path_problem(
             "Hayate's data folder, where the snippet would be saved,",
             import_file,
-            "Nothing was saved. Use Copy snippet and save the text yourself under a plain path, or point BLINK_DATA_DIR at one.",
+            "Nothing was saved. Use Copy snippet and save the text yourself under a plain path, or point HAYATE_DATA_DIR at one.",
         ));
     }
     Ok(text)
 }
 
-/// `blink-taskbar.nss` for Nilesoft Shell: one menu on the taskbar background
+/// `hayate-taskbar.nss` for Nilesoft Shell: one menu on the taskbar background
 /// (`type="taskbar"`), the same four commands as the Jump List. Syntax follows
 /// the `imports\taskbar.nss` shipped with Nilesoft Shell.
 pub fn nilesoft_snippet(exe: &str) -> Result<String, String> {
     if !nilesoft_path_ok(exe) {
-        return Err(path_problem("The path of blink.exe", exe, "Install Hayate to a folder whose path has none of them."));
+        return Err(path_problem("The path of hayate.exe", exe, "Install Hayate to a folder whose path has none of them."));
     }
     let mut s = String::new();
     s.push_str("// Hayate: entry for the taskbar background menu of Nilesoft Shell (made by Hayate, safe to delete).\n");
     s.push_str("// To use it, add this line at the top level of your shell.nss, then Shell > manager > Register, Restart Explorer:\n");
     s.push_str("//   import 'PATH OF THIS FILE'\n");
-    s.push_str("// Hayate does not edit shell.nss. Each item starts blink.exe with a public one-shot argument.\n");
+    s.push_str("// Hayate does not edit shell.nss. Each item starts hayate.exe with a public one-shot argument.\n");
     s.push_str("menu(type=\"taskbar\" title=\"Hayate\" image=\\uE9D9)\n{\n");
     for t in &TASKS {
         s.push_str(&format!("\titem(title=\"{}\" cmd='\"{exe}\"' args='{}')\n", t.title, t.arguments()));
@@ -336,7 +336,7 @@ mod tests {
         v.iter().map(|x| x.to_string()).collect()
     }
 
-    const EXE: &str = r"C:\Users\a b\AppData\Local\Programs\Blink\blink.exe";
+    const EXE: &str = r"C:\Users\a b\AppData\Local\Programs\Hayate\hayate.exe";
 
     #[test]
     fn intents_from_the_command_line() {
@@ -430,12 +430,12 @@ mod tests {
 
     #[test]
     fn fingerprint_tracks_path_and_identity() {
-        let a = fingerprint("Blink.TaskManager", EXE);
+        let a = fingerprint("Hayate.TaskManager", EXE);
         assert_eq!(a.len(), 16);
-        assert_eq!(a, fingerprint("Blink.TaskManager", &EXE.to_uppercase()));
-        assert_eq!(a, fingerprint("Blink.TaskManager", &EXE.replace('\\', "/")));
-        assert_ne!(a, fingerprint("Blink.TaskManager", r"C:\Program Files\Blink\blink.exe"));
-        assert_ne!(a, fingerprint("Blink.TaskManager.Test1", EXE));
+        assert_eq!(a, fingerprint("Hayate.TaskManager", &EXE.to_uppercase()));
+        assert_eq!(a, fingerprint("Hayate.TaskManager", &EXE.replace('\\', "/")));
+        assert_ne!(a, fingerprint("Hayate.TaskManager", r"C:\Program Files\Hayate\hayate.exe"));
+        assert_ne!(a, fingerprint("Hayate.TaskManager.Test1", EXE));
     }
 
     #[test]
@@ -484,14 +484,14 @@ mod tests {
     #[test]
     fn admin_launch_args() {
         assert_eq!(elevate_args(None, false, None), s(&["--update-show", "front"]));
-        let a = elevate_args(Some(r"G:\Blink test\data dir".into()), true, None);
-        assert_eq!(a, s(&["--update-show", "front", "--update-data-dir", r"G:\Blink test\data dir", "--update-multi"]));
+        let a = elevate_args(Some(r"G:\Hayate test\data dir".into()), true, None);
+        assert_eq!(a, s(&["--update-show", "front", "--update-data-dir", r"G:\Hayate test\data dir", "--update-multi"]));
         let line = join_args(&a);
-        assert_eq!(line, r#"--update-show front --update-data-dir "G:\Blink test\data dir" --update-multi"#);
+        assert_eq!(line, r#"--update-show front --update-data-dir "G:\Hayate test\data dir" --update-multi"#);
         // the elevated copy must not ask again
         assert!(parse_intent(&a).is_none());
         assert!(!line.contains("restart-admin"));
-        // replacing a running Blink: the elevated copy is told whom to wait for
+        // replacing a running Hayate: the elevated copy is told whom to wait for
         let r = elevate_args(None, false, Some(4242));
         assert_eq!(r, s(&["--update-show", "front", "--replace-for-admin", "--wait-pid", "4242"]));
         assert!(crate::update::logic::user_args(&r).is_empty());
@@ -521,12 +521,12 @@ mod tests {
         assert_eq!(n.matches("menu(").count(), 1);
         // it never touches the user's own config
         assert!(!n.contains("remove(") && !n.contains("modify("));
-        assert!(nilesoft_snippet(r"C:\Users\o'neil\blink.exe").is_err());
-        assert!(nilesoft_snippet(r"C:\Users\me@x\blink.exe").is_err());
-        assert!(nilesoft_snippet(r"C:\$Recycle\blink.exe").is_err());
+        assert!(nilesoft_snippet(r"C:\Users\o'neil\hayate.exe").is_err());
+        assert!(nilesoft_snippet(r"C:\Users\me@x\hayate.exe").is_err());
+        assert!(nilesoft_snippet(r"C:\$Recycle\hayate.exe").is_err());
         assert!(nilesoft_snippet("").is_err());
-        assert!(nilesoft_snippet("C:\\a\nb\\blink.exe").is_err());
-        assert!(nilesoft_snippet(r"C:\100%\blink.exe").is_err());
+        assert!(nilesoft_snippet("C:\\a\nb\\hayate.exe").is_err());
+        assert!(nilesoft_snippet(r"C:\100%\hayate.exe").is_err());
     }
 
     #[test]
@@ -548,21 +548,21 @@ mod tests {
 
     #[test]
     fn save_checks_the_import_path_too() {
-        let good_import = r"C:\Users\a b\AppData\Local\Blink\nilesoft\blink-taskbar.nss";
+        let good_import = r"C:\Users\a b\AppData\Local\Hayate\nilesoft\hayate-taskbar.nss";
         assert!(nilesoft_save(EXE, good_import).is_ok());
-        // a data dir from BLINK_DATA_DIR with syntax characters: refused before any write
-        for bad in [r"C:\o'neil\nilesoft\blink-taskbar.nss", r"D:\me@home\blink-taskbar.nss", r"E:\$data\blink-taskbar.nss", "F:\\q\"x\\blink-taskbar.nss", r"G:\50%\blink-taskbar.nss", "H:\\a\nb\\blink-taskbar.nss", ""] {
+        // a data dir from HAYATE_DATA_DIR with syntax characters: refused before any write
+        for bad in [r"C:\o'neil\nilesoft\hayate-taskbar.nss", r"D:\me@home\hayate-taskbar.nss", r"E:\$data\hayate-taskbar.nss", "F:\\q\"x\\hayate-taskbar.nss", r"G:\50%\hayate-taskbar.nss", "H:\\a\nb\\hayate-taskbar.nss", ""] {
             let e = nilesoft_save(EXE, bad).unwrap_err();
             assert!(e.contains("Nothing was saved"), "{bad:?}: {e}");
         }
         // the error names the data folder and the offending character, and a way out
-        let e = nilesoft_save(EXE, r"C:\o'neil\nilesoft\blink-taskbar.nss").unwrap_err();
-        assert!(e.contains(r"C:\o'neil") && e.contains('\'') && e.contains("BLINK_DATA_DIR") && e.contains("Copy snippet"), "{e}");
+        let e = nilesoft_save(EXE, r"C:\o'neil\nilesoft\hayate-taskbar.nss").unwrap_err();
+        assert!(e.contains(r"C:\o'neil") && e.contains('\'') && e.contains("HAYATE_DATA_DIR") && e.contains("Copy snippet"), "{e}");
         // the exe is checked as before, and named as such
-        let e = nilesoft_save(r"C:\o'neil\blink.exe", good_import).unwrap_err();
-        assert!(e.contains("blink.exe") && e.contains('\''), "{e}");
+        let e = nilesoft_save(r"C:\o'neil\hayate.exe", good_import).unwrap_err();
+        assert!(e.contains("hayate.exe") && e.contains('\''), "{e}");
         // both bad: the exe error comes first, nothing is produced
-        assert!(nilesoft_save(r"C:\o'neil\blink.exe", r"C:\p@\x.nss").is_err());
+        assert!(nilesoft_save(r"C:\o'neil\hayate.exe", r"C:\p@\x.nss").is_err());
         assert_eq!(bad_chars("a'b@c'd\n"), "' @ ?");
     }
 }

@@ -1,6 +1,6 @@
 //! Startup timing: ms since process creation for each launch milestone.
-//! One `startup:` summary line per launch always goes to blink.log (when the
-//! first paint with real Vitals data happens); `BLINK_TIMING=1` also logs
+//! One `startup:` summary line per launch always goes to hayate.log (when the
+//! first paint with real Vitals data happens); `HAYATE_TIMING=1` also logs
 //! each milestone as its own line as it happens.
 //! Cost when quiet: one Mutex push per milestone, ~25 per launch.
 
@@ -12,7 +12,7 @@ static DONE: AtomicBool = AtomicBool::new(false);
 
 pub fn detail() -> bool {
     static D: OnceLock<bool> = OnceLock::new();
-    *D.get_or_init(|| std::env::var_os("BLINK_TIMING").is_some_and(|v| v != "0"))
+    *D.get_or_init(|| crate::osutil::env_var_os("TIMING").is_some_and(|v| v != "0"))
 }
 
 /// Milliseconds since this process was created (includes loader time).
@@ -78,7 +78,7 @@ pub fn finish(what: &str) {
 }
 
 /// CPU cycles the calling thread has used so far (exact, unlike the 15.6 ms
-/// tick-sampled thread times). For `BLINK_TIMING` cost logs.
+/// tick-sampled thread times). For `HAYATE_TIMING` cost logs.
 pub fn thread_cycles() -> u64 {
     #[link(name = "kernel32")]
     extern "system" {
@@ -90,7 +90,7 @@ pub fn thread_cycles() -> u64 {
     c
 }
 
-// ---------- paint stats (BLINK_TIMING only) ----------
+// ---------- paint stats (HAYATE_TIMING only) ----------
 
 /// The current 30 s window: (total ms, EndDraw ms) per paint, its start (µs),
 /// process CPU ms at its start.
@@ -106,7 +106,7 @@ pub fn shown() {
 }
 
 /// Detail mode: collect one paint's total and EndDraw time; every 30 s log
-/// count, avg / p95 / max and Blink's own CPU % over the window. The first
+/// count, avg / p95 / max and Hayate's own CPU % over the window. The first
 /// paint after a show also logs how long the open took.
 pub fn paint_sample(ms: f32, end_ms: f32, create_ms: f32, what: impl FnOnce() -> String) {
     if !detail() {
@@ -168,7 +168,7 @@ pub fn process_cpu_ms() -> f64 {
 
 // ---------- stall detection (always on) ----------
 //
-// `stall:` lines in blink.log, so a freeze on a user's machine can be
+// `stall:` lines in hayate.log, so a freeze on a user's machine can be
 // diagnosed from the log alone. Every check is a clock read and a compare on
 // the hot path; formatting and the (rate-limited) log write happen only when a
 // threshold was crossed. Kinds:

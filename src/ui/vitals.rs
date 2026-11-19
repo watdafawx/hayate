@@ -1229,7 +1229,7 @@ fn arrange_rows(vit: &mut VitState, s: &Snapshot, by: By, keep: usize, now: u64,
 
 /// Apps view: one row per display name (case-insensitive). `build_groups`
 /// makes one group per process tree, so two hopper windows started apart, or
-/// several Blinks, would each get a row of the same name. Sums CPU, memory,
+/// several Hayates, would each get a row of the same name. Sums CPU, memory,
 /// GPU and I/O; ×N counts every process. The name and GPU engine come from
 /// the tree using the most GPU, the icon from the busiest tree (by `key`).
 fn merge_by_name(trees: Vec<(&str, Row)>) -> Vec<Row> {
@@ -1719,7 +1719,7 @@ fn show_in(groups: &[procs::Group], s: &Snapshot, id: (u32, i64), group: bool) -
     })
 }
 
-/// Live feed with no rows: idle, or traffic Blink cannot read. Never "idle" while
+/// Live feed with no rows: idle, or traffic Hayate cannot read. Never "idle" while
 /// events of an unknown layout arrive (a Windows update changing the payload).
 fn net_live_empty(f: &crate::netetw::Feed, view: crate::netetw::View) -> (&'static str, String) {
     use crate::netetw::View;
@@ -2855,10 +2855,10 @@ mod tests {
         let row = |src: usize, count: usize, cpu: f32, mem: u64, gpu: f32| Row { id: TopKey::App(format!("a{src}")), src, pi: src * 10, count, key: cpu as f64, cpu, mem, gpu, io: 0.0, down: 0, up: 0, scopes: Scopes::default() };
         let v = merge_by_name(vec![
             ("hopper", row(0, 2, 1.0, 100, 0.0)),
-            ("Blink Task Manager", row(1, 1, 0.5, 30, 0.0)),
+            ("Hayate Task Manager", row(1, 1, 0.5, 30, 0.0)),
             ("Hopper", row(2, 2, 3.0, 50, 4.0)),
-            ("blink task manager", row(3, 1, 0.2, 30, 0.0)),
-            ("BLINK TASK MANAGER", row(4, 1, 0.1, 30, 0.0)),
+            ("hayate task manager", row(3, 1, 0.2, 30, 0.0)),
+            ("HAYATE TASK MANAGER", row(4, 1, 0.1, 30, 0.0)),
             ("chrome", row(5, 9, 2.0, 900, 1.0)),
         ]);
         assert_eq!(v.len(), 3);

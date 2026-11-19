@@ -1,6 +1,6 @@
-//! Debug-only: where does Blink's working set go? Walks the address space
+//! Debug-only: where does Hayate's working set go? Walks the address space
 //! (VirtualQuery) and the resident pages (QueryWorkingSet), then logs a
-//! breakdown to blink.log. Enable with BLINK_MEMLOG=1.
+//! breakdown to hayate.log. Enable with HAYATE_MEMLOG=1.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -19,7 +19,7 @@ struct Region {
 }
 
 pub fn start() {
-    if std::env::var("BLINK_MEMLOG").is_err() {
+    if crate::osutil::env_var("MEMLOG").is_err() {
         return;
     }
     std::thread::spawn(|| {

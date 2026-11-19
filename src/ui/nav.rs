@@ -115,7 +115,7 @@ const THUMB_HOT: u32 = 0x3a414d;
 /// Ids of the scroll bars (`Hit::Bar(id)`).
 pub const BAR_HISTORY: u8 = 1;
 pub const BAR_SERVICES: u8 = 2;
-/// Startup: the Windows entries list and the Blink list share one scroll offset
+/// Startup: the Windows entries list and the Hayate list share one scroll offset
 pub const BAR_STARTUP: u8 = 3;
 pub const BAR_STARTUP_EDIT: u8 = 4;
 pub const BAR_STARTUP_IMPORT: u8 = 5;

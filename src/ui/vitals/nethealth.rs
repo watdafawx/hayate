@@ -1,5 +1,5 @@
 //! Vitals > Network adapter detail: Link use bars and the Network health panel (phase 1: passive
-//! counters, phase 2: opt-in probes). Port of the design mock; the data and the verdict come from
+//! counters, phase 2: opt-in probes). Port of docs/mock-net-health.html; the data and the verdict come from
 //! `sample::nethealth`. Nothing here talks to Windows: it draws what the sampler already read.
 
 use super::*;
@@ -879,7 +879,7 @@ mod tests {
         VNic { luid: 7, name: "Ethernet 3".into(), desc: String::new(), kind, link_bps: 2_500_000_000, rx_bps: 122e6, tx_bps: 5e6, rx_total: 0, tx_total: 0, rx: vec![], tx: vec![] }
     }
     fn off(v: &probe::View) -> Pr<'_> {
-        Pr { on: false, can: true, view: v, gw: "10.0.1.1".into(), dns: "10.0.1.1".into(), inet: "1.1.1.1".into(), st: probe::Settings::default() }
+        Pr { on: false, can: true, view: v, gw: "192.168.1.1".into(), dns: "192.168.1.1".into(), inet: "1.1.1.1".into(), st: probe::Settings::default() }
     }
     fn ad() -> AdapterHealth {
         AdapterHealth { luid: 7, up: true, pk_in_s: 1240.0, pk_out_s: 380.0, err_total: 1208, ..Default::default() }

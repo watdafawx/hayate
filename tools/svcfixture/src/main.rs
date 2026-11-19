@@ -1,6 +1,6 @@
 //! A service that does nothing: reports Running, accepts Stop, exits on Stop.
-//! Register it under a `BlinkFixture...` name on a test machine only (see
-//! docs/services.md); Blink's debug test hooks and the ignored real-SCM test
+//! Register it under a `HayateFixture...` name on a test machine only (see
+//! docs/services.md); Hayate's debug test hooks and the ignored real-SCM test
 //! refuse any other name.
 //!
 //! The name it answers to is whatever the SCM started it as: ServiceMain's first
@@ -44,7 +44,7 @@ unsafe extern "system" fn handler(control: u32, _ev: u32, _data: *mut core::ffi:
 
 unsafe extern "system" fn service_main(argc: u32, argv: *mut PWSTR) {
     // argv[0] is the name this service was started under; it registers under exactly that
-    let name = if argc >= 1 && !argv.is_null() && !(*argv).is_null() { PCWSTR((*argv).0 as *const u16) } else { w!("BlinkFixture") };
+    let name = if argc >= 1 && !argv.is_null() && !(*argv).is_null() { PCWSTR((*argv).0 as *const u16) } else { w!("HayateFixture") };
     let Ok(h) = RegisterServiceCtrlHandlerExW(name, Some(handler), None) else { return };
     STATUS.store(h.0 as isize, Ordering::SeqCst);
     let Ok(ev) = CreateEventW(None, true, false, None) else { return };

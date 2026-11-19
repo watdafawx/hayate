@@ -1,12 +1,12 @@
 //! "Disallow running": end a process that matches an enabled Disallow rule.
 //!
 //! This is detection followed by termination, NOT launch prevention and NOT a
-//! security sandbox: the program may run for a moment before Blink ends it, it is
-//! only ended while Blink runs with enough rights, and anything that can start
-//! faster or stronger than Blink wins. No driver, service, scheduled task,
+//! security sandbox: the program may run for a moment before Hayate ends it, it is
+//! only ended while Hayate runs with enough rights, and anything that can start
+//! faster or stronger than Hayate wins. No driver, service, scheduled task,
 //! Image File Execution Options key, firewall rule or elevation is involved.
 //!
-//! How one process is ended ([`Engine::enforce`], always on the blink-disallow
+//! How one process is ended ([`Engine::enforce`], always on the hayate-disallow
 //! worker, never on the UI thread and never on the ETW callback):
 //! 1. a handle opened against PID **and creation time** (`osutil::open_verified`)
 //!    is the only way the process is touched; while it is open the PID cannot be
@@ -180,7 +180,7 @@ pub enum Stage {
 
 // ---- jobs -------------------------------------------------------------------
 
-/// Work for the blink-disallow worker.
+/// Work for the hayate-disallow worker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Job {
     /// a process started: identity read at the event

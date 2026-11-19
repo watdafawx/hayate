@@ -2,12 +2,12 @@
 //! the stage / apply / rollback decisions and the relaunch command line.
 //! No I/O here, so all of it is unit-tested.
 
-/// `%LOCALAPPDATA%\Blink\update.ini`, written by install.ps1 (user-owned).
+/// `%LOCALAPPDATA%\Hayate\update.ini`, written by install.ps1 (user-owned).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Config {
-    /// Folder with blink.exe + blink.exe.sha256 + version.txt (the publish step output).
+    /// Folder with hayate.exe + hayate.exe.sha256 + version.txt (publish.ps1 output).
     pub source: Option<String>,
-    /// Folder of the installed blink.exe. Only a copy running from here updates itself.
+    /// Folder of the installed hayate.exe. Only a copy running from here updates itself.
     pub install_dir: Option<String>,
     pub enabled: bool,
 }
@@ -86,14 +86,14 @@ pub fn source_allowed(source: &str, install: &str) -> Result<(), &'static str> {
     }
 }
 
-/// `blink.exe.sha256`: first token, 64 hex digits (lowercased). Accepts
-/// `<hex>`, `<hex>  blink.exe` and PowerShell's upper-case output.
+/// `hayate.exe.sha256`: first token, 64 hex digits (lowercased). Accepts
+/// `<hex>`, `<hex>  hayate.exe` and PowerShell's upper-case output.
 pub fn parse_sha_file(text: &str) -> Option<String> {
     let t = text.trim_start_matches('\u{feff}').split_whitespace().next()?;
     (t.len() == 64 && t.bytes().all(|b| b.is_ascii_hexdigit())).then(|| t.to_ascii_lowercase())
 }
 
-/// `version.txt` from the publish step: `key=value` lines (sha, commit, built).
+/// `version.txt` from publish.ps1: `key=value` lines (sha, commit, built).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VersionInfo {
     pub sha: String,
@@ -127,13 +127,86 @@ pub fn label(version: Option<&VersionInfo>, exe_sha: &str) -> String {
     }
 }
 
-// ---- state file (app-owned): %LOCALAPPDATA%\Blink\update-state.ini --------
+// ---- install layout (new and pre-rename) ---------------------------------------
+
+/// Which install layout this updater drives.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Layout {
+    /// `hayate.exe` in `Programs\Hayate` / `ProgramFiles\Hayate`
+    New,
+    /// the pre-rename `blink.exe` in `Programs\Blink` / `ProgramFiles\Blink`
+    Legacy,
+}
+
+/// File names of one layout. The staged / old / bad names follow the running exe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Names {
+    pub exe: &'static str,
+    pub new_exe: &'static str,
+    pub old_exe: &'static str,
+    pub bad_exe: &'static str,
+    pub new_ver: &'static str,
+    pub old_ver: &'static str,
+}
+
+pub fn names(l: Layout) -> Names {
+    match l {
+        Layout::New => Names { exe: "hayate.exe", new_exe: "hayate.new.exe", old_exe: "hayate.old.exe", bad_exe: "hayate.bad.exe", new_ver: "hayate.new.version.txt", old_ver: "version.old.txt" },
+        Layout::Legacy => Names { exe: "blink.exe", new_exe: "blink.new.exe", old_exe: "blink.old.exe", bad_exe: "blink.bad.exe", new_ver: "blink.new.version.txt", old_ver: "version.old.txt" },
+    }
+}
+
+fn file_name(p: &str) -> &str {
+    p.rsplit(['\\', '/']).next().unwrap_or(p)
+}
+
+/// Which layout `exe` is, from the folder `update.ini` names and the known
+/// folders. The new layout wins only with its own exe name in its own folders;
+/// the pre-rename layout keeps updating until the migration moves it. Anything
+/// else (a portable copy, another name, another folder) is no self-update.
+pub fn install_layout(exe: &str, cfg_install: &str, local_app_data: &str, program_files: &str) -> Option<Layout> {
+    let dir = exe.rsplit_once(['\\', '/']).map(|(d, _)| d).unwrap_or("");
+    let la = local_app_data.trim_end_matches(['\\', '/']);
+    let pf = program_files.trim_end_matches(['\\', '/']);
+    let name = file_name(exe);
+    // `update.ini` counts only for a folder of the matching layout name, so a
+    // config naming one layout can never authorise the other's exe name
+    let cfg = |leaf: &str| same_dir(dir, cfg_install) && file_name(dir.trim_end_matches(['\\', '/'])).eq_ignore_ascii_case(leaf);
+    if name.eq_ignore_ascii_case("hayate.exe") {
+        let new = [format!("{la}\\Programs\\Hayate"), format!("{pf}\\Hayate")];
+        return (cfg("Hayate") || new.iter().any(|d| same_dir(dir, d))).then_some(Layout::New);
+    }
+    if name.eq_ignore_ascii_case("blink.exe") {
+        let old = [format!("{la}\\Programs\\Blink"), format!("{pf}\\Blink")];
+        return (cfg("Blink") || old.iter().any(|d| same_dir(dir, d))).then_some(Layout::Legacy);
+    }
+    None
+}
+
+/// The source files to stage: `(exe, sha256)` in the drop folder. The bridge
+/// release publishes both names from the same bytes; a legacy copy prefers the
+/// new one and falls back to its own.
+pub fn source_names(l: Layout, has_hayate: bool, has_blink: bool) -> Option<(&'static str, &'static str)> {
+    match l {
+        Layout::New => has_hayate.then_some(("hayate.exe", "hayate.exe.sha256")),
+        Layout::Legacy if has_hayate => Some(("hayate.exe", "hayate.exe.sha256")),
+        Layout::Legacy if has_blink => Some(("blink.exe", "blink.exe.sha256")),
+        Layout::Legacy => None,
+    }
+}
+
+/// The two exe names this updater may ever run its helper for.
+pub fn layout_exe_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("hayate.exe") || name.eq_ignore_ascii_case("blink.exe")
+}
+
+// ---- state file (app-owned): %LOCALAPPDATA%\Hayate\update-state.ini --------
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     /// exe sha256 being tried right now (set by the old instance before relaunch)
     pub trial: String,
-    /// exe sha256 it replaced (blink.old.exe)
+    /// exe sha256 it replaced (hayate.old.exe)
     pub from: String,
     /// pid of the trial instance once it started (written by the trial itself)
     pub trial_pid: u32,
@@ -216,7 +289,7 @@ impl State {
 pub enum Stage {
     /// nothing new (same build, a known-bad build, or already staged)
     Nothing(&'static str),
-    /// copy + verify this build into blink.new.exe
+    /// copy + verify this build into hayate.new.exe
     Stage,
 }
 
@@ -270,7 +343,7 @@ pub fn swap_now(mode: Apply, clicked: bool, window_visible: bool, idle_ms: u32) 
     }
 }
 
-/// Status-bar offer while an elevated Blink has a verified build staged.
+/// Status-bar offer while an elevated Hayate has a verified build staged.
 pub fn offer_text(label: &str, declined: bool) -> String {
     if declined {
         format!("UAC cancelled · update {label} still ready · restart")
@@ -336,12 +409,12 @@ pub fn rolled_back_note(label: &str) -> String {
     format!("Update {label} failed at start; rolled back \u{b7} click to try again")
 }
 
-// ---- UAC relaunch (elevated Blink only) ------------------------------------------
+// ---- UAC relaunch (elevated Hayate only) ------------------------------------------
 //
 // `runas` from an already elevated process starts the child elevated with no
 // prompt, so consent has to be asked from an unelevated process: the elevated
-// old instance has Explorer start `blink.old.exe --update-elevate …` (this
-// build, unelevated), which ShellExecuteExW("runas")s the new blink.exe and
+// old instance has Explorer start `hayate.old.exe --update-elevate …` (this
+// build, unelevated), which ShellExecuteExW("runas")s the new hayate.exe and
 // writes the outcome to a result file. The old instance waits for that file,
 // then watches the new pid as before.
 
@@ -443,7 +516,7 @@ pub enum Trial {
     /// the user closed it on purpose (X, Esc, tray Quit) before ready: exit code 0 and the
     /// instance said so in the state file. Not a failed build: keep it, mark nothing bad.
     UserQuit,
-    /// it crashed, exited without saying why, or hung before ready: restore blink.old.exe
+    /// it crashed, exited without saying why, or hung before ready: restore hayate.old.exe
     Rollback(&'static str),
 }
 
@@ -511,15 +584,15 @@ pub struct Restore {
     /// normal (restored) window rect: left, top, right, bottom
     pub place: Option<(i32, i32, i32, i32)>,
     pub maximized: bool,
-    /// BLINK_DATA_DIR / BLINK_MULTI of the old instance. Only set on the UAC
+    /// HAYATE_DATA_DIR / HAYATE_MULTI of the old instance. Only set on the UAC
     /// path: that relaunch goes through Explorer and loses our environment.
     pub data_dir: Option<String>,
     pub multi: bool,
 }
 
 // `--tab <name>`, `--open`, `--restart-admin` (taskbar.rs) are one-shot: a relaunch must never replay them
-const PRIVATE: [&str; 8] = ["--update-trial", "--update-show", "--update-tab", "--update-place", "--update-max", "--wait-pid", "--update-data-dir", "--tab"];
-// `--startup-logon` is the startup manager's private proof of "started by Blink's own autorun": an update or restart must never carry it over
+const PRIVATE: [&str; 9] = ["--update-trial", "--update-show", "--update-tab", "--update-place", "--update-max", "--wait-pid", "--update-data-dir", "--tab", "--rename-finish"];
+// `--startup-logon` is the startup manager's private proof of "started by Hayate's own autorun": an update or restart must never carry it over
 const PRIVATE_FLAGS: [&str; 6] = ["--update-max", "--update-multi", "--open", "--restart-admin", "--replace-for-admin", "--startup-logon"];
 
 /// Args minus the private relaunch ones (and their values).
@@ -657,11 +730,65 @@ mod tests {
         v.iter().map(|x| x.to_string()).collect()
     }
 
+    // ---- install layout (docs/rename-full.md "Updater bridge") ----
+
+    #[test]
+    fn layout_matrix_new_and_both_legacy_installs() {
+        let la = r"C:\Users\u\AppData\Local";
+        let pf = r"C:\Program Files";
+        let cfg = r"C:\Users\u\AppData\Local\Programs\Hayate";
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Hayate\hayate.exe", cfg, la, pf), Some(Layout::New));
+        assert_eq!(install_layout(r"C:\Program Files\Hayate\hayate.exe", cfg, la, pf), Some(Layout::New));
+        // the update.ini of a bridged copy still names the old folder: the known folder counts
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Hayate\hayate.exe", r"C:\Users\u\AppData\Local\Programs\Blink", la, pf), Some(Layout::New));
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Blink\blink.exe", r"C:\Users\u\AppData\Local\Programs\Blink", la, pf), Some(Layout::Legacy));
+        assert_eq!(install_layout(r"C:\Program Files\Blink\blink.exe", r"C:\Program Files\Blink", la, pf), Some(Layout::Legacy));
+    }
+
+    #[test]
+    fn layout_refuses_portable_copies_and_wrong_names() {
+        let la = r"C:\Users\u\AppData\Local";
+        let pf = r"C:\Program Files";
+        let cfg = r"C:\Users\u\AppData\Local\Programs\Hayate";
+        assert_eq!(install_layout(r"C:\Users\u\Downloads\hayate.exe", "", la, pf), None, "an unconfigured portable copy never updates itself");
+        assert_eq!(install_layout(r"C:\Users\u\Downloads\blink.exe", "", la, pf), None);
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Hayate\blink.exe", cfg, la, pf), None, "old name in the new folder");
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Hayate\hayate-tm.exe", cfg, la, pf), None);
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Blink\hayate.exe", r"C:\Users\u\AppData\Local\Programs\Blink", la, pf), None, "new name in the old folder");
+        assert_eq!(install_layout(r"C:\Users\u\AppData\Local\Programs\Hayate\sub\hayate.exe", cfg, la, pf), None);
+    }
+
+    #[test]
+    fn source_prefers_the_new_build_and_falls_back_only_for_the_legacy_layout() {
+        assert_eq!(source_names(Layout::New, true, true), Some(("hayate.exe", "hayate.exe.sha256")));
+        assert_eq!(source_names(Layout::New, false, true), None, "a new install never takes blink.exe");
+        assert_eq!(source_names(Layout::Legacy, true, true), Some(("hayate.exe", "hayate.exe.sha256")));
+        assert_eq!(source_names(Layout::Legacy, false, true), Some(("blink.exe", "blink.exe.sha256")));
+        assert_eq!(source_names(Layout::Legacy, false, false), None);
+    }
+
+    #[test]
+    fn staged_names_follow_the_running_layout() {
+        let n = names(Layout::New);
+        assert_eq!((n.exe, n.new_exe, n.old_exe, n.bad_exe), ("hayate.exe", "hayate.new.exe", "hayate.old.exe", "hayate.bad.exe"));
+        let l = names(Layout::Legacy);
+        assert_eq!((l.exe, l.new_exe, l.old_exe, l.bad_exe), ("blink.exe", "blink.new.exe", "blink.old.exe", "blink.bad.exe"));
+        assert!(layout_exe_name("BLINK.EXE") && layout_exe_name("hayate.exe") && !layout_exe_name("blink-tm.exe"));
+    }
+
+    #[test]
+    fn rename_finish_args_are_private_to_the_relaunch() {
+        let a = s(&["--resident", "--rename-finish", r"C:\D\rename.pending"]);
+        assert_eq!(user_args(&a), s(&["--resident"]));
+        let r = relaunch_args(&a, &Restore::default());
+        assert!(!r.iter().any(|x| x == "--rename-finish"), "{r:?}");
+    }
+
     #[test]
     fn config() {
-        let c = parse_config("; c\n[update]\nsource = X:\\Dev\\blink\\dist\ninstall_dir = \"C:\\U\\Programs\\Blink\" ; note\n");
-        assert_eq!(c.source.as_deref(), Some("X:\\Dev\\blink\\dist"));
-        assert_eq!(c.install_dir.as_deref(), Some("C:\\U\\Programs\\Blink"));
+        let c = parse_config("; c\n[update]\nsource = X:\\Dev\\hayate\\dist\ninstall_dir = \"C:\\U\\Programs\\Hayate\" ; note\n");
+        assert_eq!(c.source.as_deref(), Some("X:\\Dev\\hayate\\dist"));
+        assert_eq!(c.install_dir.as_deref(), Some("C:\\U\\Programs\\Hayate"));
         assert!(c.enabled);
         let c = parse_config("source =\nenabled = false\n");
         assert_eq!(c.source, None);
@@ -671,14 +798,14 @@ mod tests {
 
     #[test]
     fn dirs() {
-        assert!(same_dir("C:\\Users\\M\\AppData\\Local\\Programs\\Blink\\", "c:/users/m/appdata/local/programs/blink"));
-        assert!(!same_dir("C:\\Dev\\blink\\target\\release", "C:\\Users\\M\\AppData\\Local\\Programs\\Blink"));
+        assert!(same_dir("C:\\Users\\M\\AppData\\Local\\Programs\\Hayate\\", "c:/users/m/appdata/local/programs/hayate"));
+        assert!(!same_dir("C:\\Dev\\hayate\\target\\release", "C:\\Users\\M\\AppData\\Local\\Programs\\Hayate"));
         assert!(!same_dir("", ""));
     }
 
     #[test]
     fn sha_file() {
-        assert_eq!(parse_sha_file(&format!("{}  blink.exe\r\n", A.to_uppercase())).as_deref(), Some(A));
+        assert_eq!(parse_sha_file(&format!("{}  hayate.exe\r\n", A.to_uppercase())).as_deref(), Some(A));
         assert_eq!(parse_sha_file(&format!("\u{feff}{B}")).as_deref(), Some(B));
         assert_eq!(parse_sha_file("abc"), None);
         assert_eq!(parse_sha_file(""), None);
@@ -801,14 +928,14 @@ mod tests {
 
     #[test]
     fn source_inside_install_rejected() {
-        let inst = r"C:\Users\M\AppData\Local\Programs\Blink";
-        assert!(source_allowed(r"X:\Dev\blink\dist", inst).is_ok());
+        let inst = r"C:\Users\M\AppData\Local\Programs\Hayate";
+        assert!(source_allowed(r"C:\src\hayate\dist", inst).is_ok());
         assert!(source_allowed(r"\\fox\dist", inst).is_ok());
         assert!(source_allowed(inst, inst).is_err());
         assert!(source_allowed(&format!(r"{inst}\"), inst).is_err());
         assert!(source_allowed(&format!(r"{inst}\drop"), inst).is_err());
         assert!(source_allowed(&format!(r"{}\drop\x", inst.to_uppercase()), inst).is_err());
-        assert!(source_allowed("c:/users/m/appdata/local/programs/blink/sub", inst).is_err());
+        assert!(source_allowed("c:/users/m/appdata/local/programs/hayate/sub", inst).is_err());
         assert!(source_allowed(&format!(r"{inst}\a\..\b"), inst).is_err());
         assert!(source_allowed(&format!(r"\\?\{inst}\drop"), inst).is_err());
         // .. that leaves the install dir is fine; a sibling with the same prefix is not "inside"
@@ -839,9 +966,9 @@ mod tests {
 
     #[test]
     fn uac_helper_protocol() {
-        let h = Helper { nonce: "n1".into(), result: r"C:\D\update-uac.txt".into(), exe: r"C:\P B\blink.exe".into(), args: s(&["--update-trial", A, "--update-data-dir", r"G:\a b"]) };
-        let line = helper_cmd(r"C:\P B\blink.old.exe", &h);
-        assert!(line.starts_with(r#""C:\P B\blink.old.exe" --update-elevate n1 C:\D\update-uac.txt "C:\P B\blink.exe" --update-trial "#), "{line}");
+        let h = Helper { nonce: "n1".into(), result: r"C:\D\update-uac.txt".into(), exe: r"C:\P B\hayate.exe".into(), args: s(&["--update-trial", A, "--update-data-dir", r"G:\a b"]) };
+        let line = helper_cmd(r"C:\P B\hayate.old.exe", &h);
+        assert!(line.starts_with(r#""C:\P B\hayate.old.exe" --update-elevate n1 C:\D\update-uac.txt "C:\P B\hayate.exe" --update-trial "#), "{line}");
         assert!(line.ends_with(r#"--update-data-dir "G:\a b""#), "{line}");
         // what the helper sees as argv[1..] after the C runtime splits that line
         let mut argv = vec![HELPER_ARG.to_string(), h.nonce.clone(), h.result.clone(), h.exe.clone()];
@@ -874,20 +1001,20 @@ mod tests {
 
     #[test]
     fn cmdline() {
-        assert_eq!(command_line("C:\\A B\\blink.exe", &s(&["--resident", "a b", "q\"x", "end\\"])), "\"C:\\A B\\blink.exe\" --resident \"a b\" \"q\\\"x\" end\\");
+        assert_eq!(command_line("C:\\A B\\hayate.exe", &s(&["--resident", "a b", "q\"x", "end\\"])), "\"C:\\A B\\hayate.exe\" --resident \"a b\" \"q\\\"x\" end\\");
         assert_eq!(command_line("c.exe", &s(&["", "x y\\"])), "\"c.exe\" \"\" \"x y\\\\\"");
     }
 
     #[test]
     fn restart_as_admin_keeps_the_test_environment_and_tab() {
-        let r = Restore { data_dir: Some(r"G:\Blink test\data dir".into()), multi: true, tab: Some(3), ..Default::default() };
+        let r = Restore { data_dir: Some(r"G:\Hayate test\data dir".into()), multi: true, tab: Some(3), ..Default::default() };
         let args = admin_relaunch_args(&r, 4242);
-        assert_eq!(args, s(&["--update-tab", "3", "--update-data-dir", r"G:\Blink test\data dir", "--update-multi", "--wait-pid", "4242"]));
+        assert_eq!(args, s(&["--update-tab", "3", "--update-data-dir", r"G:\Hayate test\data dir", "--update-multi", "--wait-pid", "4242"]));
         // what the elevated copy parses back after the C runtime splits the quoted line
         let line = join_args(&args);
-        assert_eq!(line, r#"--update-tab 3 --update-data-dir "G:\Blink test\data dir" --update-multi --wait-pid 4242"#);
+        assert_eq!(line, r#"--update-tab 3 --update-data-dir "G:\Hayate test\data dir" --update-multi --wait-pid 4242"#);
         let back = parse_restore(&args);
-        assert_eq!((back.data_dir.as_deref(), back.multi, back.tab), (Some(r"G:\Blink test\data dir"), true, Some(3)));
+        assert_eq!((back.data_dir.as_deref(), back.multi, back.tab), (Some(r"G:\Hayate test\data dir"), true, Some(3)));
         // nothing else rides along: no trial, no window placement, no free-form command
         assert_eq!((back.trial, back.show, back.place, back.maximized), (None, None, None, false));
         // a plain install has no environment to carry: only the wait

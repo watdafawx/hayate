@@ -1,16 +1,16 @@
-//! Blink's own "Start with Windows" shortcut, as far as the startup manager is
+//! Hayate's own "Start with Windows" shortcut, as far as the startup manager is
 //! concerned.
 //!
-//! The logon run needs proof that THIS start came from Blink's own autorun and
-//! not from a manual `--resident`, an update or a restart. Blink does not add a
-//! second autorun. The existing Startup shortcut (`Blink.lnk`) gets one private
+//! The logon run needs proof that THIS start came from Hayate's own autorun and
+//! not from a manual `--resident`, an update or a restart. Hayate does not add a
+//! second autorun. The existing Startup shortcut (`Hayate.lnk`) gets one private
 //! argument ([`LOGON_FLAG`]) when, and only when, the user turns the startup
 //! manager on and presses Save; turning it off takes the argument out again.
 //! Other arguments on the shortcut are kept as they are. If the shortcut cannot
 //! be changed the switch stays off (rollback), and the shortcut file is put back
 //! to its exact earlier bytes if saving it failed half way.
 //!
-//! The shortcut is user-writable, so it is only ever parsed by a Blink that is
+//! The shortcut is user-writable, so it is only ever parsed by a Hayate that is
 //! provably not elevated (callers check [`crate::osutil::elevation`]).
 
 use std::path::PathBuf;
@@ -33,17 +33,17 @@ pub struct OwnAutorun {
     pub exists: bool,
     /// Windows has it enabled (StartupApproved; a missing value is Windows' default: enabled)
     pub enabled: bool,
-    /// StartupApproved holds a value of a shape Blink does not recognise: neither on nor off as far as
-    /// Blink can tell (`enabled` is false then, but that is not "switched off in Windows")
+    /// StartupApproved holds a value of a shape Hayate does not recognise: neither on nor off as far as
+    /// Hayate can tell (`enabled` is false then, but that is not "switched off in Windows")
     pub unknown: bool,
-    /// it starts a Blink exe
-    pub is_blink: bool,
+    /// it starts a Hayate exe
+    pub is_hayate: bool,
     pub args: String,
 }
 
 impl OwnAutorun {
     fn missing() -> OwnAutorun {
-        OwnAutorun { exists: false, enabled: false, unknown: false, is_blink: false, args: String::new() }
+        OwnAutorun { exists: false, enabled: false, unknown: false, is_hayate: false, args: String::new() }
     }
 
     pub fn has_resident(&self) -> bool {
@@ -56,7 +56,7 @@ impl OwnAutorun {
 
     /// The conditions the logon run needs from the shortcut.
     pub fn ok(&self) -> bool {
-        self.exists && self.enabled && self.is_blink && self.has_resident() && self.has_flag()
+        self.exists && self.enabled && self.is_hayate && self.has_resident() && self.has_flag()
     }
 }
 
@@ -70,7 +70,7 @@ fn id() -> EntryId {
 
 /// The shortcut as the Startup tab's last scan saw it (no I/O here). `None` =
 /// not known: the scan has not arrived, the user's Startup folder could not be
-/// read, or the shortcut target was not read (an elevated Blink lists shortcuts
+/// read, or the shortcut target was not read (an elevated Hayate lists shortcuts
 /// by name only).
 pub fn from_scan(entries: &[super::scan::Entry], problems: &[String], user_dir: &std::path::Path) -> Option<OwnAutorun> {
     let dir = user_dir.to_string_lossy();
@@ -83,7 +83,7 @@ pub fn from_scan(entries: &[super::scan::Entry], problems: &[String], user_dir: 
         Some(e) => {
             let t = e.target.as_ref()?;
             let st = e.state();
-            Some(OwnAutorun { exists: true, enabled: st == State::Enabled, unknown: st == State::Unknown, is_blink: e.is_blink, args: t.args.clone() })
+            Some(OwnAutorun { exists: true, enabled: st == State::Enabled, unknown: st == State::Unknown, is_hayate: e.is_hayate, args: t.args.clone() })
         }
     }
 }
@@ -91,15 +91,15 @@ pub fn from_scan(entries: &[super::scan::Entry], problems: &[String], user_dir: 
 /// Why the startup list cannot run at sign-in, in the order the checks are made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gap {
-    /// this Blink is elevated (or cannot tell): it does not read or edit the shortcut
+    /// this Hayate is elevated (or cannot tell): it does not read or edit the shortcut
     Unchecked,
     /// the shortcut could not be read
     Unreadable,
     Missing,
-    NotBlink,
-    /// StartupApproved holds a shape Blink does not recognise (never overwritten, so nothing to offer)
+    NotHayate,
+    /// StartupApproved holds a shape Hayate does not recognise (never overwritten, so nothing to offer)
     UnknownShape,
-    /// Windows switched it off (a value Blink recognises)
+    /// Windows switched it off (a value Hayate recognises)
     Disabled,
     NoResident,
     NoFlag,
@@ -113,8 +113,8 @@ pub fn gap(own: Option<&OwnAutorun>, elevated: Option<bool>) -> Option<Gap> {
     let Some(o) = own else { return Some(Gap::Unreadable) };
     if !o.exists {
         Some(Gap::Missing)
-    } else if !o.is_blink {
-        Some(Gap::NotBlink)
+    } else if !o.is_hayate {
+        Some(Gap::NotHayate)
     } else if o.unknown {
         Some(Gap::UnknownShape)
     } else if !o.enabled {
@@ -142,7 +142,7 @@ pub enum Signin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Offer {
     pub text: &'static str,
-    /// the one button (None: nothing Blink may do from here; the text then says what to do)
+    /// the one button (None: nothing Hayate may do from here; the text then says what to do)
     pub button: Option<&'static str>,
     /// what the button will do, for its tooltip
     pub tip: &'static str,
@@ -172,10 +172,10 @@ pub fn signin(manage: bool, asked: bool, known: bool, own: Option<&OwnAutorun>, 
         None => Signin::Quiet,
         Some(Gap::Unchecked) => unfixable("Hayate is running as administrator, so it does not read or change its Start with Windows shortcut. Use a normal Hayate."),
         Some(Gap::Unreadable) => unfixable("Hayate could not read its Start with Windows shortcut."),
-        Some(Gap::NotBlink) => unfixable("Blink.lnk in your Startup folder does not start Hayate, so Hayate will not change it."),
-        Some(Gap::NoResident) => unfixable("Blink.lnk in your Startup folder does not start Hayate hidden (--resident), so Hayate will not change it."),
+        Some(Gap::NotHayate) => unfixable("Hayate.lnk in your Startup folder does not start Hayate, so Hayate will not change it."),
+        Some(Gap::NoResident) => unfixable("Hayate.lnk in your Startup folder does not start Hayate hidden (--resident), so Hayate will not change it."),
         Some(Gap::Missing) => Signin::Blocked {
-            why: "Hayate does not start with Windows (no Blink.lnk in your Startup folder).",
+            why: "Hayate does not start with Windows (no Hayate.lnk in your Startup folder).",
             offer: fix("Adds Hayate's Startup shortcut: hidden in the tray, never as administrator. Same shortcut Settings > Install writes."),
         },
         Some(Gap::UnknownShape) => unfixable("Windows holds a setting for Start with Windows in a form Hayate does not recognise: change it in Task Manager > Startup apps."),
@@ -193,7 +193,7 @@ pub fn read(loc: &Locations) -> Option<OwnAutorun> {
     let live = approved::read(loc, &id()).ok()?;
     let t = scan::resolve_link(&p.to_string_lossy())?;
     let st = live.effective();
-    Some(OwnAutorun { exists: true, enabled: st == State::Enabled, unknown: st == State::Unknown, is_blink: scan::is_blink_image(&t.path), args: t.args })
+    Some(OwnAutorun { exists: true, enabled: st == State::Enabled, unknown: st == State::Unknown, is_hayate: scan::is_hayate_image(&t.path), args: t.args })
 }
 
 /// New argument text for the shortcut, keeping every unrelated argument.
@@ -217,7 +217,7 @@ fn sta<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Put the flag on (or take it off) the shortcut. Refuses (changes nothing) when
-/// the shortcut is missing, does not start Blink, or is disabled in Windows (a
+/// the shortcut is missing, does not start Hayate, or is disabled in Windows (a
 /// startup manager that could never run would only look on). `Err` = the file is
 /// exactly as it was.
 pub fn set_flag(loc: &Locations, on: bool) -> Result<(), String> {
@@ -226,7 +226,7 @@ pub fn set_flag(loc: &Locations, on: bool) -> Result<(), String> {
     if !cur.exists {
         return if on { Err("Start with Windows is off, and the startup manager runs through that shortcut.".into()) } else { Ok(()) };
     }
-    if !cur.is_blink {
+    if !cur.is_hayate {
         return Err("The Start with Windows shortcut does not start Hayate, so Hayate will not change it.".into());
     }
     if on && cur.unknown {
@@ -248,7 +248,7 @@ pub fn set_flag(loc: &Locations, on: bool) -> Result<(), String> {
         sl.SetArguments(&HSTRING::from(new_args.as_str())).map_err(|e| e.message())?;
         pf.Save(&HSTRING::from(p.as_os_str()), true).map_err(|e| e.message())
     });
-    let verify = || read(loc).is_some_and(|a| a.has_flag() == on && a.is_blink && a.has_resident() == cur.has_resident());
+    let verify = || read(loc).is_some_and(|a| a.has_flag() == on && a.is_hayate && a.has_resident() == cur.has_resident());
     match saved {
         Ok(()) if verify() => Ok(()),
         other => {
@@ -258,13 +258,13 @@ pub fn set_flag(loc: &Locations, on: bool) -> Result<(), String> {
                 Ok(()) => "the saved shortcut did not read back as expected".to_string(),
             };
             let restored = crate::osutil::write_atomic(&p, &before).is_ok();
-            Err(format!("Could not change the Start with Windows shortcut ({why}). {}", if restored { "It was left as it was." } else { "It could not be put back; check Blink.lnk in your Startup folder." }))
+            Err(format!("Could not change the Start with Windows shortcut ({why}). {}", if restored { "It was left as it was." } else { "It could not be put back; check Hayate.lnk in your Startup folder." }))
         }
     }
 }
 
-/// Windows' own on/off for Blink.lnk: back on, the way Task Manager does it.
-/// Refuses a value Blink does not recognise (never overwritten).
+/// Windows' own on/off for Hayate.lnk: back on, the way Task Manager does it.
+/// Refuses a value Hayate does not recognise (never overwritten).
 fn enable(loc: &Locations) -> Result<(), String> {
     let live = approved::read(loc, &id()).map_err(|e| format!("cannot read the startup setting: {}", e.text()))?;
     match live.effective() {
@@ -279,7 +279,7 @@ fn enable(loc: &Locations) -> Result<(), String> {
     }
 }
 
-/// The Startup tab's offer, one explicit click: bring Blink's own Start with
+/// The Startup tab's offer, one explicit click: bring Hayate's own Start with
 /// Windows shortcut to what the logon run needs. Reads the real state again
 /// (the tab's copy may be old), then does only what is missing, in this order:
 ///
@@ -287,7 +287,7 @@ fn enable(loc: &Locations) -> Result<(), String> {
 /// 2. disabled in Windows: switch it back on (StartupApproved, like Task Manager);
 /// 3. `flag`: the private argument (only when the list is ON; the flag never appears while it is off).
 ///
-/// A shortcut that does not start Blink, or does not start it hidden, is never
+/// A shortcut that does not start Hayate, or does not start it hidden, is never
 /// rewritten. No elevation, task or second autorun is involved. The gates are
 /// checked here, first, before anything is read or written (not only by the
 /// caller): this must be the per-user installed copy and provably not elevated.
@@ -327,11 +327,11 @@ fn make_ready_as(loc: &Locations, flag: bool, gate: Gate, create: impl FnOnce() 
             return Err("Hayate wrote its Start with Windows shortcut but could not find it again.".into());
         }
     }
-    if !cur.is_blink {
-        return Err("Blink.lnk in your Startup folder does not start Hayate, so Hayate will not change it.".into());
+    if !cur.is_hayate {
+        return Err("Hayate.lnk in your Startup folder does not start Hayate, so Hayate will not change it.".into());
     }
     if !cur.has_resident() {
-        return Err("Blink.lnk in your Startup folder does not start Hayate hidden (--resident), so Hayate will not change it. Delete it and use the offer again to get a new one.".into());
+        return Err("Hayate.lnk in your Startup folder does not start Hayate hidden (--resident), so Hayate will not change it. Delete it and use the offer again to get a new one.".into());
     }
     if !cur.enabled {
         enable(loc)?;
@@ -352,7 +352,7 @@ mod tests {
 
     fn mk(tag: &str) -> (Scratch, PathBuf, Locations) {
         let s = Scratch::new(tag);
-        let dir = std::env::temp_dir().join(format!("BlinkStartupFixture-own-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("HayateStartupFixture-own-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("user")).unwrap();
         std::fs::create_dir_all(dir.join("common")).unwrap();
@@ -360,10 +360,10 @@ mod tests {
         (s, dir, loc)
     }
 
-    /// A real .lnk at `loc`'s Startup folder starting this test exe renamed as blink.exe is not possible;
-    /// the shortcut points at a file called blink.exe in the fixture dir (is_blink_image goes by name).
+    /// A real .lnk at `loc`'s Startup folder starting this test exe renamed as hayate.exe is not possible;
+    /// the shortcut points at a file called hayate.exe in the fixture dir (is_hayate_image goes by name).
     fn write_lnk(loc: &Locations, dir: &PathBuf, args: &str) {
-        let exe = dir.join("blink.exe");
+        let exe = dir.join("hayate.exe");
         std::fs::write(&exe, b"MZ").unwrap();
         let p = path(loc);
         sta(|| unsafe {
@@ -388,7 +388,7 @@ mod tests {
         let (_s, dir, loc) = mk("flag");
         write_lnk(&loc, &dir, "--resident --keep-me");
         let before = read(&loc).unwrap();
-        assert!(before.exists && before.enabled && before.is_blink && !before.has_flag() && !before.ok());
+        assert!(before.exists && before.enabled && before.is_hayate && !before.has_flag() && !before.ok());
         set_flag(&loc, true).unwrap();
         let on = read(&loc).unwrap();
         assert!(on.ok(), "{on:?}");
@@ -413,13 +413,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn own(exists: bool, enabled: bool, is_blink: bool, args: &str) -> OwnAutorun {
-        OwnAutorun { exists, enabled, unknown: false, is_blink, args: args.into() }
+    fn own(exists: bool, enabled: bool, is_hayate: bool, args: &str) -> OwnAutorun {
+        OwnAutorun { exists, enabled, unknown: false, is_hayate, args: args.into() }
     }
 
-    /// StartupApproved holds a shape Blink does not know: not enabled, but not "switched off" either
+    /// StartupApproved holds a shape Hayate does not know: not enabled, but not "switched off" either
     fn unknown_shape(args: &str) -> OwnAutorun {
-        OwnAutorun { exists: true, enabled: false, unknown: true, is_blink: true, args: args.into() }
+        OwnAutorun { exists: true, enabled: false, unknown: true, is_hayate: true, args: args.into() }
     }
 
     fn blocked(s: &Signin) -> (&'static str, Option<&Offer>) {
@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(blocked(&s).1.unwrap().button, Some(OFFER_BUTTON));
         // ... and once the shortcut is right again there is nothing to say while the switch is OFF
         assert_eq!(signin(false, true, true, Some(&good), el, inst), Signin::Quiet);
-        // shortcuts Blink must not rewrite: text only, no button
+        // shortcuts Hayate must not rewrite: text only, no button
         for o in [own(true, true, false, "--resident --startup-logon"), own(true, true, true, "--startup-logon")] {
             let s = signin(true, false, true, Some(&o), el, inst);
             let (why, offer) = blocked(&s);
@@ -534,10 +534,10 @@ mod tests {
             id: id(),
             raw: String::new(),
             command: String::new(),
-            target: Some(Target { path: r"C:\b\blink.exe".into(), args: "--resident".into(), dir: String::new(), icon: String::new() }),
+            target: Some(Target { path: r"C:\b\hayate.exe".into(), args: "--resident".into(), dir: String::new(), icon: String::new() }),
             icon: String::new(),
             live: Live::new(true, Some(vec![9, 9, 9]), None),
-            is_blink: true,
+            is_hayate: true,
             sig: None,
         };
         let o = from_scan(&[e], &[], &PathBuf::from(r"C:\Users\x\Startup")).unwrap();
@@ -549,14 +549,14 @@ mod tests {
         use crate::startup::approved::Live;
         use crate::startup::scan::{Entry, Target};
         let dir = PathBuf::from(r"C:\Users\x\Startup");
-        let lnk = |state: Option<Vec<u8>>, args: &str, blink: bool| Entry {
+        let lnk = |state: Option<Vec<u8>>, args: &str, hayate: bool| Entry {
             id: id(),
             raw: String::new(),
             command: String::new(),
-            target: Some(Target { path: r"C:\b\blink.exe".into(), args: args.into(), dir: String::new(), icon: String::new() }),
+            target: Some(Target { path: r"C:\b\hayate.exe".into(), args: args.into(), dir: String::new(), icon: String::new() }),
             icon: String::new(),
             live: Live::new(true, state, None),
-            is_blink: blink,
+            is_hayate: hayate,
             sig: None,
         };
         assert_eq!(from_scan(&[], &[], &dir), Some(own(false, false, false, "")), "nothing in the folder = missing");
@@ -605,7 +605,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The gates are inside make_ready: a portable / per-machine copy, an elevated Blink and one that
+    /// The gates are inside make_ready: a portable / per-machine copy, an elevated Hayate and one that
     /// cannot tell all get an error with NOTHING read or written (creator not run, registry and file untouched).
     #[test]
     fn make_ready_refuses_unless_installed_and_provably_not_elevated() {
@@ -670,7 +670,7 @@ mod tests {
         let bytes = std::fs::read(path(&loc)).unwrap();
         assert!(make_ready_as(&loc, true, OK, || panic!("exists")).unwrap_err().contains("--resident"));
         assert_eq!(std::fs::read(path(&loc)).unwrap(), bytes, "not touched");
-        // a StartupApproved value of a shape Blink does not know is never overwritten
+        // a StartupApproved value of a shape Hayate does not know is never overwritten
         write_lnk(&loc, &dir, "--resident");
         approved::write(&loc, &id(), Some(&approved::disabled_bytes(approved::filetime_now()))).unwrap();
         let k = crate::startup::reg::create(loc.hkcu, &Locations::approved_path(&id()), windows::Win32::System::Registry::KEY_SET_VALUE | windows::Win32::System::Registry::KEY_WOW64_64KEY).unwrap();

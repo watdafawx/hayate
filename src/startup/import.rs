@@ -2,7 +2,7 @@
 //! what would be added, and add only what they select.
 //!
 //! * Read-only: the file is read once; nothing of Launchpad's is written,
-//!   launched, disabled or "fixed". Blink never looks for the file by itself.
+//!   launched, disabled or "fixed". Hayate never looks for the file by itself.
 //! * Preview first: every entry with its problems, name clashes and what its
 //!   original startup entry looks like right now. Nothing is selected by default.
 //! * Importing changes no Windows startup entry. Entries are added switched
@@ -10,7 +10,7 @@
 //!   still starts the same programs, and only the user can decide which of the
 //!   two managers keeps doing it.
 //! * Limits: the file is untrusted text (size, entry count, field bounds and the
-//!   same validation as a hand-edited Blink list).
+//!   same validation as a hand-edited Hayate list).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -407,7 +407,7 @@ cpu_below = 250
     }
     fn rig(tag: &str) -> Rig {
         let s = Scratch::new(tag);
-        let dir = std::env::temp_dir().join(format!("BlinkStartupFixture-import-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("HayateStartupFixture-import-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let loc = Locations { hkcu: s.user.0, hklm: s.machine.0, user_dir: dir.join("user"), common_dir: dir.join("common") };

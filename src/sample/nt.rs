@@ -63,8 +63,8 @@ pub struct Spi {
 
 /// SystemBasicProcessInformation (Windows 11 25H2+): pid, parent, sequence
 /// number and image name only, no per-thread records. Two orders of
-/// magnitude cheaper than SystemProcessInformation (test machine, 350 processes:
-/// 26 us vs 6.5 ms; dev PC, 700 processes: 37 us vs 13 ms), so a process list
+/// magnitude cheaper than SystemProcessInformation (rig, 350 processes:
+/// 26 us vs 6.5 ms; FOX, 700 processes: 37 us vs 13 ms), so a process list
 /// that needs no counters uses this when the kernel knows the class.
 pub const SYSTEM_BASIC_PROCESS_INFORMATION: u32 = 252;
 

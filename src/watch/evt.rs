@@ -1,6 +1,6 @@
 //! System log subscription: Service Control Manager 7045 / 7036 / 7040 / 7034,
 //! push via EvtSubscribe callback (0 CPU idle). A persisted bookmark catches
-//! up on events from while Blink was not running.
+//! up on events from while Hayate was not running.
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
@@ -189,7 +189,7 @@ fn render(h: EVT_HANDLE, flags: u32) -> Option<String> {
     }
 }
 
-/// Atomic write with a per-process temp name, so two Blink instances
+/// Atomic write with a per-process temp name, so two Hayate instances
 /// (user + admin) saving at once never interleave into one temp file.
 fn write_bookmark(x: &str) {
     let f = bookmark_file();
@@ -349,7 +349,7 @@ pub fn stop() {
 mod tests {
     use super::*;
 
-    const X7045: &str = "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Service Control Manager' Guid='{555908d1-a6d7-4695-8e1e-26931d2012f4}' EventSourceName='Service Control Manager'/><EventID Qualifiers='16384'>7045</EventID><Version>0</Version><Level>4</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8080000000000000</Keywords><TimeCreated SystemTime='2026-11-15T10:20:30.1234567Z'/><EventRecordID>123456</EventRecordID><Correlation/><Execution ProcessID='1024' ThreadID='2048'/><Channel>System</Channel><Computer>dev PC</Computer><Security UserID='S-1-5-18'/></System><EventData><Data Name='ServiceName'>NEPb67ocmj</Data><Data Name='ImagePath'>\\SystemRoot\\System32\\drivers\\NEPb67ocmj.sys</Data><Data Name='ServiceType'>kernel mode driver</Data><Data Name='StartType'>demand start</Data><Data Name='AccountName'></Data></EventData></Event>";
+    const X7045: &str = "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Service Control Manager' Guid='{555908d1-a6d7-4695-8e1e-26931d2012f4}' EventSourceName='Service Control Manager'/><EventID Qualifiers='16384'>7045</EventID><Version>0</Version><Level>4</Level><Task>0</Task><Opcode>0</Opcode><Keywords>0x8080000000000000</Keywords><TimeCreated SystemTime='2026-11-15T10:20:30.1234567Z'/><EventRecordID>123456</EventRecordID><Correlation/><Execution ProcessID='1024' ThreadID='2048'/><Channel>System</Channel><Computer>FOX</Computer><Security UserID='S-1-5-18'/></System><EventData><Data Name='ServiceName'>NEPb67ocmj</Data><Data Name='ImagePath'>\\SystemRoot\\System32\\drivers\\NEPb67ocmj.sys</Data><Data Name='ServiceType'>kernel mode driver</Data><Data Name='StartType'>demand start</Data><Data Name='AccountName'></Data></EventData></Event>";
 
     const X7036: &str = "<Event><System><EventID Qualifiers='16384'>7036</EventID><TimeCreated SystemTime='2026-11-15T10:20:30Z'/><EventRecordID>7</EventRecordID></System><EventData><Data Name='param1'>Windows Update</Data><Data Name='param2'>running</Data></EventData><Binary>770075006100750073006500720076002F0034000000</Binary></Event>";
 

@@ -1,7 +1,7 @@
 //! Service properties: opened from a service's right-click menu, drawn over the
 //! tab body like the CPU panel (nothing modal, nothing before a click).
 //!
-//! This is Blink's own panel, not the native Windows one. Windows has no
+//! This is Hayate's own panel, not the native Windows one. Windows has no
 //! documented way to open the Services console on one service or on its
 //! Properties page: mmc.exe takes only a console file, /a, /32 and /64
 //! (learn.microsoft.com/windows-server/administration/windows-commands/mmc).
@@ -134,7 +134,7 @@ fn pump(p: &mut Props) {
         p.err = Some(format!("Windows has not answered the read of {} after {} s. Close and reopen this panel to try again.", p.t.name, READ_WAIT.as_secs()));
     }
     if p.apply.is_some() && p.apply_at.is_some_and(|t| t.elapsed() > APPLY_WAIT) {
-        // the write may still land; Blink does not claim otherwise and does not cancel it
+        // the write may still land; Hayate does not claim otherwise and does not cancel it
         p.apply = None;
         p.msg = Some((false, format!("Windows has not answered after {} s. The change may still complete; Hayate does not cancel it. Reading the service again.", APPLY_WAIT.as_secs())));
         p.reset_sel = true;

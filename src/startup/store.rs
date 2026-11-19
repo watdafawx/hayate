@@ -1,7 +1,7 @@
-//! Durable storage of the managed list (`startup.ini` in Blink's data dir).
+//! Durable storage of the managed list (`startup.ini` in Hayate's data dir).
 //!
 //! Disk work is serialized behind an epoch gate (a slow older write can never
-//! replace a newer acknowledged one) and a file Blink cannot read or does not
+//! replace a newer acknowledged one) and a file Hayate cannot read or does not
 //! understand is NEVER overwritten.
 //!
 //! There is ONE way to change the list: [`Store::update_sync`]. It writes in the
@@ -12,7 +12,7 @@
 //! release) additionally hold [`Store::ops`], so a worker the watchdog gave up on
 //! and its replacement can never interleave their steps.
 //!
-//! A list with entries Blink could not read (`Snapshot::dropped`) is never
+//! A list with entries Hayate could not read (`Snapshot::dropped`) is never
 //! rewritten silently: the first save keeps the old file as `startup.ini.bak`
 //! and the UI shows a warning while any entry is dropped.
 
@@ -180,7 +180,7 @@ mod tests {
     use crate::startup::model::App;
 
     fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("BlinkStartupFixture-store-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("HayateStartupFixture-store-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -257,12 +257,12 @@ mod tests {
     fn a_locked_store_never_overwrites_the_file() {
         let d = tmp("locked");
         let file = d.join("startup.ini");
-        std::fs::write(&file, "blink-startup 7\nmanage=1\n").unwrap();
+        std::fs::write(&file, "hayate-startup 7\nmanage=1\n").unwrap();
         let s = Arc::new(Store::new(file.clone()));
         s.load();
         assert!(s.snapshot().locked.is_some());
         assert!(s.update_sync(|c| add(c, "A")).is_err());
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "blink-startup 7\nmanage=1\n");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "hayate-startup 7\nmanage=1\n");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -270,7 +270,7 @@ mod tests {
     fn dropped_entries_are_kept_in_a_backup_before_the_first_rewrite() {
         let d = tmp("backup");
         let file = d.join("startup.ini");
-        let original = "blink-startup 1\nmanage=0\n\n[app]\nid=a1\nname=ok\ncommand=C:\\a.exe\n\n[app]\nid=a2\nname=bad\ncommand=x.exe\ncpu_below=250\n";
+        let original = "hayate-startup 1\nmanage=0\n\n[app]\nid=a1\nname=ok\ncommand=C:\\a.exe\n\n[app]\nid=a2\nname=bad\ncommand=x.exe\ncpu_below=250\n";
         std::fs::write(&file, original).unwrap();
         let s = Arc::new(Store::new(file.clone()));
         s.load();

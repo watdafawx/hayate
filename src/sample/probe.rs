@@ -1,6 +1,6 @@
-//! Opt-in network probes for Vitals > Network (phase 2 of the design mock).
+//! Opt-in network probes for Vitals > Network (phase 2 of docs/mock-net-health.html).
 //!
-//! OFF by default and persisted in `%LOCALAPPDATA%\Blink\vitals.ini`. When ON, and only while the
+//! OFF by default and persisted in `%LOCALAPPDATA%\Hayate\vitals.ini`. When ON, and only while the
 //! Network detail is on screen with the window shown, one dedicated thread sends every ~2 s:
 //!   * one ICMP echo (IcmpSendEcho2Ex, 32-byte payload, 1 s timeout) to the selected adapter's
 //!     gateway, from that adapter's IPv4 address,
@@ -62,7 +62,7 @@ const DNS_BYTES: f32 = 175.0;
 pub const DEFAULT_INTERNET: Ipv4Addr = Ipv4Addr::new(1, 1, 1, 1);
 pub const DEFAULT_DNS_NAME: &str = "example.com";
 
-// thresholds [warn, hot] (the design mock, "WARN / HOT at")
+// thresholds [warn, hot] (docs/mock-net-health.html, "WARN / HOT at")
 pub const TH_GW_RTT: [f64; 2] = [15.0, 50.0];
 pub const TH_GW_JIT: [f64; 2] = [5.0, 15.0];
 pub const TH_IN_RTT: [f64; 2] = [80.0, 200.0];
@@ -75,7 +75,7 @@ pub const DEAD_ROUNDS: u32 = 3;
 // ---------- settings (vitals.ini) ----------
 
 /// The switch and the editable targets. The targets are read once at start; edit the file while
-/// Blink is closed. There is no free-text control in the UI, so they show as read-only chips.
+/// Hayate is closed. There is no free-text control in the UI, so they show as read-only chips.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub enabled: bool,
@@ -92,7 +92,7 @@ impl Default for Settings {
     }
 }
 
-/// A literal IPv4 address Blink may send an echo to: one host, no range, no wildcard, and none of
+/// A literal IPv4 address Hayate may send an echo to: one host, no range, no wildcard, and none of
 /// the addresses that are never a host (0.x, loopback, multicast, reserved, broadcast).
 pub fn valid_ipv4(s: &str) -> Option<Ipv4Addr> {
     let ip: Ipv4Addr = s.trim().parse().ok()?;
@@ -100,7 +100,7 @@ pub fn valid_ipv4(s: &str) -> Option<Ipv4Addr> {
     (!(o[0] == 0 || o[0] == 127 || o[0] >= 224)).then_some(ip)
 }
 
-/// A DNS host name Blink may look up: letters, digits and hyphens in dot-separated labels, at
+/// A DNS host name Hayate may look up: letters, digits and hyphens in dot-separated labels, at
 /// most 253 characters, not an IP literal, no wildcard, no scheme, no path, no port.
 pub fn valid_hostname(s: &str) -> Option<String> {
     let s = s.trim().trim_end_matches('.');
@@ -157,7 +157,7 @@ pub fn render_ini(s: &Settings) -> String {
          ; Edit the targets while Hayate is closed. With probes on, and only while Vitals > Network is open,\n\
          ; Hayate sends every 2 s: one ICMP echo to the adapter's gateway, one to `internet` (a single IPv4\n\
          ; address, or `none` for no external destination) and one DNS lookup of `dns_name` to the\n\
-         ; adapter's own DNS server. See the Defender review notes.\n\
+         ; adapter's own DNS server. See docs/defender.md.\n\
          [net_probes]\nenabled = {}\ninternet = {}\ndns_name = {}\n",
         s.enabled,
         s.internet.map_or("none".to_string(), |i| i.to_string()),
@@ -387,7 +387,7 @@ pub fn lease(cfg: Cfg) {
         g.running = true;
         spawn
     };
-    if spawn && std::thread::Builder::new().name("blink-probe".into()).stack_size(256 * 1024).spawn(run).is_err() {
+    if spawn && std::thread::Builder::new().name("hayate-probe".into()).stack_size(256 * 1024).spawn(run).is_err() {
         st().running = false;
     }
     CV.notify_all();
@@ -1024,8 +1024,8 @@ mod tests {
     fn config_holds_only_the_three_destinations() {
         let st = Settings::default();
         let c = cfg_for(7, "10.0.0.10 / 24", "10.0.0.1", "10.0.0.1", &st, "wired", Some(7)).unwrap();
-        assert_eq!((c.src, c.gw, c.inet), (Ipv4Addr::new(10, 0, 0, 10), Some(Ipv4Addr::new(10, 0, 0, 1)), Inet::Target(DEFAULT_INTERNET)));
-        assert_eq!(c.dns, Some((Ipv4Addr::new(10, 0, 0, 1), "example.com".into())));
+        assert_eq!((c.src, c.gw, c.inet), (Ipv4Addr::new(192, 168, 50, 10), Some(Ipv4Addr::new(192, 168, 50, 1)), Inet::Target(DEFAULT_INTERNET)));
+        assert_eq!(c.dns, Some((Ipv4Addr::new(192, 168, 50, 1), "example.com".into())));
         // no gateway / DNS server: those are skipped, never guessed
         let c = cfg_for(7, "10.0.0.2 / 8", "", "", &st, "wired", None).unwrap();
         assert_eq!((c.gw, c.dns), (None, None));

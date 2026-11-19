@@ -443,8 +443,8 @@ fn kind_tip(k: StartKind) -> &'static str {
 
 /// Services that Windows itself protects: on a stock Windows 11 the service's own security
 /// descriptor gives Administrators no "change configuration" right (read-only `sc sdshow` scan of
-/// a machine, 2026-11-18), so a startup change is refused even when Blink is elevated. These are
-/// names Blink already shows in every row; nothing is opened or read to decide (no extra SCM
+/// a machine, 2026-11-18), so a startup change is refused even when Hayate is elevated. These are
+/// names Hayate already shows in every row; nothing is opened or read to decide (no extra SCM
 /// handle, registry read or ACL code). Lower case; per-user services match by prefix below.
 const PROTECTED_NAMES: &[&str] = &[
     "appxsvc", "bfe", "brokerinfrastructure", "clipsvc", "coremessagingregistrar", "dcomlaunch", "dnscache", "embeddedmode", "entappsvc", "gpsvc", "mdcoresvc",
@@ -456,7 +456,7 @@ const PROTECTED_NAMES: &[&str] = &[
 const PROTECTED_USER_PREFIXES: &[&str] = &["credentialenrollmentmanagerusersvc_", "deviceassociationbrokersvc_", "printworkflowusersvc_"];
 
 /// Pure: protected by name or by program folder (the Defender / Windows Security folders, from the
-/// same `rules/protect.rs` list that keeps Blink from ending those programs). The Windows folder
+/// same `rules/protect.rs` list that keeps Hayate from ending those programs). The Windows folder
 /// is NOT used: nearly every service lives there and most can be changed.
 fn protected_by(ctx: &crate::rules::protect::Ctx, name: &str, path: &str) -> bool {
     let n = name.to_ascii_lowercase();
@@ -465,7 +465,7 @@ fn protected_by(ctx: &crate::rules::protect::Ctx, name: &str, path: &str) -> boo
         || (!path.is_empty() && matches!(crate::rules::protect::path_check(ctx, Some(path)), Err(crate::rules::protect::Refusal::SecurityTool)))
 }
 
-/// Services that refused a startup change while Blink was elevated: Windows protects them. Kept
+/// Services that refused a startup change while Hayate was elevated: Windows protects them. Kept
 /// for the rest of the session (lower-case key names); filled from the result of the one guarded
 /// write path, never by probing.
 static REFUSED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
@@ -621,7 +621,7 @@ fn undo_live(u: &Undo, seq_now: u32, now: Instant) -> bool {
 }
 
 /// Pure: the target as it stands after the confirmed change, and whether it is risky. None when
-/// nothing changed or the read-back did not confirm `want`: no Undo is offered for what Blink
+/// nothing changed or the read-back did not confirm `want`: no Undo is offered for what Hayate
 /// cannot vouch for.
 fn undo_after(t: &Target, expect: StartKind, want: StartKind, d: &svcctl::StartupDone) -> Option<(Target, bool)> {
     if expect == want || d.after.kind() != Some(want) {

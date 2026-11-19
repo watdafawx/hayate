@@ -417,7 +417,7 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("blink-store-{}-{}", std::process::id(), name));
+        let d = std::env::temp_dir().join(format!("hayate-store-{}-{}", std::process::id(), name));
         let _ = std::fs::create_dir_all(&d);
         let f = d.join("events.log");
         let _ = std::fs::remove_file(&f);

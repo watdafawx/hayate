@@ -677,11 +677,41 @@ fn win_dir() -> String {
     std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()).to_lowercase() + "\\"
 }
 
+/// Is this one of our own images: the installed exe, a staging / parked / multi
+/// copy, the Task Manager launcher, or the pre-rename `blink.exe` while an old
+/// install still runs. Presentation only: it decides what counts as "Hayate"
+/// when grouping, never what may be started or ended.
+pub fn is_own_image(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    let stem = n.strip_suffix(".exe").unwrap_or(&n);
+    for base in ["hayate", "blink"] {
+        let Some(rest) = stem.strip_prefix(base) else { continue };
+        if rest.is_empty() || matches!(rest, ".new" | ".old" | ".bad") {
+            return true;
+        }
+        if let Some(r) = rest.strip_prefix('-') {
+            if r == "multi" || r == "tm" || r.starts_with("tm.") {
+                return true;
+            }
+            if !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Groups processes the way Task Manager does: chains of same-named
 /// processes collapse into their topmost ancestor; non-windowed children of
 /// an app (except under Explorer) join that app.
+///
+/// One exception: a program Hayate started at sign-in is its own program, not
+/// part of Hayate. Its helpers (a console host, a crash handler) stay with it,
+/// so the Hayate row shows Hayate's own memory instead of the sum of everything
+/// it launched.
 pub fn build_groups(snap: &Snapshot) -> Vec<Group> {
     let procs = &snap.procs;
+    let own: Vec<bool> = procs.iter().map(|p| is_own_image(&p.name)).collect();
     let by_pid: HashMap<u32, usize> = procs.iter().enumerate().map(|(i, p)| (p.pid, i)).collect();
     let parent = |i: usize| -> Option<usize> {
         let p = &procs[i];
@@ -701,16 +731,45 @@ pub fn build_groups(snap: &Snapshot) -> Vec<Group> {
     }
     // app membership: windowed roots are apps
     let windowed_root: HashSet<usize> = (0..procs.len()).filter(|&i| procs[i].windowed).map(|i| root[i]).collect();
-    // attach non-windowed child roots to an app parent (not explorer)
+    // attach non-windowed child roots to an app parent (not explorer). What we
+    // started ourselves stays out of our group unless it is another copy of us.
     for &i in &order {
         if root[i] != i || windowed_root.contains(&i) {
             continue;
         }
         if let Some(pi) = parent(i) {
             let pr = root[pi];
-            if windowed_root.contains(&pr) && !procs[pr].name.eq_ignore_ascii_case("explorer.exe") {
+            // a program we started is not part of us; a child of one of our own
+            // helpers (launcher, staging copy) still is
+            let foreign_under_us = own[pr] && !own[i] && pi == pr;
+            if windowed_root.contains(&pr) && !procs[pr].name.eq_ignore_ascii_case("explorer.exe") && !foreign_under_us {
                 root[i] = pr;
             }
+        }
+    }
+    // the helpers of a program we started belong with that program: walk up to
+    // the nearest ancestor that is a direct child of one of our images
+    for &i in &order {
+        if root[i] != i || windowed_root.contains(&i) || own[i] {
+            continue;
+        }
+        let mut a = parent(i);
+        let mut guard = 0;
+        while let Some(pi) = a {
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+            if own[pi] {
+                break;
+            }
+            if parent(pi).is_some_and(|g| own[g]) {
+                if root[pi] == pi {
+                    root[i] = pi;
+                }
+                break;
+            }
+            a = parent(pi);
         }
     }
     // resolve chains (a child root may itself have been re-rooted)
@@ -1696,5 +1755,77 @@ mod tests {
         let r = pv.cell_rect(first, 0).unwrap();
         assert_eq!((r.x, r.w, r.h), (100.0, 200.0, ROW_H));
         assert_eq!(r.y, 80.0 + first as f32 * ROW_H - ROW_H);
+    }
+
+    fn windowed_child(pid: u32, create: i64, ppid: u32, name: &str) -> Proc {
+        Proc { ppid, ..proc(pid, create, name, 0.0) }
+    }
+
+    fn group_of(groups: &[Group], pid: u32) -> &Group {
+        groups.iter().find(|g| g.key.0 == pid).unwrap_or_else(|| panic!("no group for pid {pid}: {:?}", groups.iter().map(|g| (g.key, g.name.clone())).collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn our_own_image_names_are_recognised() {
+        for n in ["hayate.exe", "HAYATE.EXE", "Hayate", "hayate-tm.exe", "hayate-tm.old.exe", "hayate.new.exe", "hayate-1234.exe", "hayate-multi.exe", "blink.exe", "blink-tm.exe", "blink.old.exe", "blink-77.exe"] {
+            assert!(is_own_image(n), "{n}");
+        }
+        for n in ["notepad.exe", "hayatex.exe", "hayate-ish.exe", "blinkfeed.exe", "explorer.exe", ""] {
+            assert!(!is_own_image(n), "{n}");
+        }
+    }
+
+    /// The screenshot case: Hayate is the parent of everything it starts at
+    /// sign-in. Its row must count Hayate only, and each started program keeps
+    /// its own helpers.
+    #[test]
+    fn programs_hayate_started_are_their_own_groups() {
+        let s = snap(vec![
+            proc(100, 10, "hayate.exe", 0.0),
+            windowed_child(200, 20, 100, "deckviz.exe"), // started app with a window
+            child(300, 30, 200, "conhost.exe", 0.0),     // its console
+            child(400, 40, 100, "node.exe", 0.0),        // started app without a window
+            child(500, 50, 400, "conhost.exe", 0.0),     // its console
+        ]);
+        let g = build_groups(&s);
+        assert_eq!(group_of(&g, 100).members.len(), 1, "Hayate's own row is Hayate only");
+        assert_eq!(group_of(&g, 200).members.len(), 2, "the started app keeps its console");
+        let node = group_of(&g, 400);
+        assert_eq!(node.members.len(), 2, "the console hangs off the program, not off Hayate");
+        assert_eq!(node.kind, Kind::Background);
+        assert_eq!(g.len(), 3);
+    }
+
+    /// A second copy of us (helper, launcher, pre-rename blink.exe) is still us.
+    #[test]
+    fn another_copy_of_our_image_still_joins_us() {
+        let s = snap(vec![
+            proc(100, 10, "hayate.exe", 0.0),
+            child(200, 20, 100, "hayate-tm.exe", 0.0),
+            child(300, 30, 200, "conhost.exe", 0.0),
+        ]);
+        let g = build_groups(&s);
+        assert_eq!(group_of(&g, 100).members.len(), 3);
+        // and the pre-rename name counts the same way
+        let s = snap(vec![proc(100, 10, "blink.exe", 0.0), child(200, 20, 100, "node.exe", 0.0)]);
+        let g = build_groups(&s);
+        assert_eq!(group_of(&g, 100).members.len(), 1);
+        assert_eq!(group_of(&g, 200).members.len(), 1);
+    }
+
+    /// Everything else keeps Task Manager's grouping.
+    #[test]
+    fn unrelated_trees_are_grouped_as_before() {
+        let s = snap(vec![
+            proc(10, 10, "explorer.exe", 0.0),
+            child(20, 20, 10, "svchost.exe", 0.0),
+            child(30, 30, 20, "service.exe", 0.0), // non-windowed under non-windowed: own row, as before
+            windowed_child(40, 40, 0, "game.exe"),
+            child(50, 50, 40, "helper.exe", 0.0), // joins the app with the window
+        ]);
+        let g = build_groups(&s);
+        assert_eq!(group_of(&g, 20).members.len(), 1);
+        assert_eq!(group_of(&g, 30).members.len(), 1);
+        assert_eq!(group_of(&g, 40).members.len(), 2);
     }
 }

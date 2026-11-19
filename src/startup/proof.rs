@@ -1,16 +1,16 @@
 //! Administrator-protected proof of an all-users take-over.
 //!
-//! The ownership records live in `startup.ini` under `%LOCALAPPDATA%\Blink`,
+//! The ownership records live in `startup.ini` under `%LOCALAPPDATA%\Hayate`,
 //! which any process of the user can write, also an unelevated one. For a
 //! per-user entry that is fine: whoever can forge the record can write the
 //! HKCU value it points at anyway. For an all-users entry it is not: an
-//! elevated Blink (Restart as admin, `--startup-release` from an elevated
+//! elevated Hayate (Restart as admin, `--startup-release` from an elevated
 //! `install.ps1 -Uninstall`) would write an HKLM StartupApproved value chosen
 //! by an unelevated process.
 //!
-//! So when an elevated Blink takes over an all-users entry it ALSO writes the
+//! So when an elevated Hayate takes over an all-users entry it ALSO writes the
 //! record (written bytes + original bytes) into
-//! `HKLM\SOFTWARE\Blink\StartupOwnership`, a key it creates with a protected
+//! `HKLM\SOFTWARE\Hayate\StartupOwnership`, a key it creates with a protected
 //! access list: SYSTEM and Administrators full, Users read. Giving an all-users
 //! entry back requires that copy to exist, to be in a key that only SYSTEM and
 //! Administrators can change (owner and every write-granting entry checked on
@@ -33,7 +33,7 @@ use super::reg::{self, Key};
 use crate::osutil::{pcw, wide};
 
 /// Under the HKLM root of [`Locations`] (the real HKLM in production).
-pub const KEY: &str = r"SOFTWARE\Blink\StartupOwnership";
+pub const KEY: &str = r"SOFTWARE\Hayate\StartupOwnership";
 /// Owner Administrators; protected (nothing inherited); SYSTEM + Administrators full, Users read.
 const SDDL: &str = "O:BAD:P(A;;KA;;;SY)(A;;KA;;;BA)(A;;KR;;;BU)";
 
@@ -204,7 +204,7 @@ pub fn check(loc: &Locations, id: &EntryId, written: &[u8], original: Option<&[u
 
 /// Drop the protected copy once the take-over is over. Best effort: an
 /// unelevated process cannot, and a stale copy proves nothing on its own (a
-/// give-back still needs the live value to be exactly the bytes Blink wrote).
+/// give-back still needs the live value to be exactly the bytes Hayate wrote).
 pub fn forget(loc: &Locations, id: &EntryId) {
     if let Ok(k) = reg::open(loc.hklm, KEY, KEY_READ | KEY_SET_VALUE | KEY_WOW64_64KEY) {
         if key_admin_only(&k).is_ok() {
@@ -221,9 +221,9 @@ fn may_change() -> bool {
 
 /// Drop the copy of a record that is being dropped WITHOUT a give-back
 /// (reconcile found the take-over never happened, or the entry was changed
-/// outside Blink since). Only from an elevated process and only when the copy
+/// outside Hayate since). Only from an elevated process and only when the copy
 /// proves exactly this record, so a forged record never erases another
-/// record's copy. In both cases the live value is no longer the bytes Blink
+/// record's copy. In both cases the live value is no longer the bytes Hayate
 /// wrote, so the copy could not give anything back any more. Never fails;
 /// true = the copy was removed.
 pub fn forget_proven(loc: &Locations, id: &EntryId, written: &[u8], original: Option<&[u8]>) -> bool {
@@ -234,8 +234,8 @@ pub fn forget_proven(loc: &Locations, id: &EntryId, written: &[u8], original: Op
     check(loc, id, written, original).is_err()
 }
 
-/// `SOFTWARE\Blink` under the HKLM root: removed by [`tidy`] only when empty.
-const PARENT: &str = r"SOFTWARE\Blink";
+/// `SOFTWARE\Hayate` under the HKLM root: removed by [`tidy`] only when empty.
+const PARENT: &str = r"SOFTWARE\Hayate";
 
 /// No values and no subkeys (unreadable = not empty).
 fn empty(k: &Key) -> bool {
@@ -251,7 +251,7 @@ fn delete_key(root: HKEY, path: &str) -> bool {
 
 /// After an uninstall gave everything back: remove the protected key once it
 /// holds no copy at all (another user's take-over keeps it), and then
-/// `SOFTWARE\Blink` if that is empty too. Elevated only; an unreadable,
+/// `SOFTWARE\Hayate` if that is empty too. Elevated only; an unreadable,
 /// non-empty or not admin-protected key is kept. Never fails; true = the
 /// StartupOwnership key was removed.
 pub fn tidy(loc: &Locations) -> bool {
@@ -312,7 +312,7 @@ mod tests {
     }
 
     fn id() -> EntryId {
-        EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "BlinkStartupFixture Proof")
+        EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "HayateStartupFixture Proof")
     }
 
     fn loc(s: &Scratch) -> Locations {
@@ -330,11 +330,11 @@ mod tests {
         save(&l, &id(), &w, Some(&o)).unwrap();
         assert_eq!(check(&l, &id(), &w, Some(&o)), Ok(()));
         // the key's case does not matter, the bytes do
-        let upper = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "BLINKSTARTUPFIXTURE PROOF");
+        let upper = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "HAYATESTARTUPFIXTURE PROOF");
         assert_eq!(check(&l, &upper, &w, Some(&o)), Ok(()));
         assert!(check(&l, &id(), &w, None).is_err(), "other original");
         assert!(check(&l, &id(), &approved::disabled_bytes(43), Some(&o)).is_err(), "other written");
-        assert!(check(&l, &EntryId::new(Kind::Run, Scope::AllUsers, View::Wow32, "BlinkStartupFixture Proof"), &w, Some(&o)).is_err(), "other entry");
+        assert!(check(&l, &EntryId::new(Kind::Run, Scope::AllUsers, View::Wow32, "HayateStartupFixture Proof"), &w, Some(&o)).is_err(), "other entry");
         forget(&l, &id());
         assert!(check(&l, &id(), &w, Some(&o)).is_err());
         TRUST_ANY_KEY.with(|t| t.set(false));
@@ -355,7 +355,7 @@ mod tests {
         reg::set_binary(&k, &name(&id()), &encode(&w, Some(&o))).unwrap();
         let err = check(&l, &id(), &w, Some(&o)).unwrap_err();
         assert!(err.contains("not administrator-protected"), "{err}");
-        // and Blink never writes a record into it either
+        // and Hayate never writes a record into it either
         assert!(save(&l, &id(), &w, Some(&o)).is_err());
     }
 
@@ -413,7 +413,7 @@ mod tests {
         assert!(!tidy(&l), "a copy is still held (another take-over)");
         assert!(has_value(&l, &id()));
         forget(&l, &id());
-        // something else lives in SOFTWARE\Blink: the parent stays
+        // something else lives in SOFTWARE\Hayate: the parent stays
         let p = reg::open(l.hklm, PARENT, KEY_READ | KEY_SET_VALUE | KEY_WOW64_64KEY).unwrap();
         reg::set_binary(&p, "other", &[1]).unwrap();
         drop(p);
@@ -447,27 +447,27 @@ mod tests {
         }
     }
 
-    /// One-time proof against the REAL HKLM (Job B, 2026-11-18, test machine only).
-    /// Never runs by default: needs `--ignored`, `BLINK_REAL_HKLM_PROOF=1` and an
-    /// elevated process. Touches only two uniquely named `zz-blinkproof-*`
+    /// One-time proof against the REAL HKLM (Job B, 2026-11-18, rig only).
+    /// Never runs by default: needs `--ignored`, `HAYATE_REAL_HKLM_PROOF=1` and an
+    /// elevated process. Touches only two uniquely named `zz-hayateproof-*`
     /// values under HKLM StartupApproved\Run (no Run value, no real entry), their
     /// copies in the StartupOwnership key, and that key; it removes all of them,
-    /// and the key (and SOFTWARE\Blink) only when this run created them.
+    /// and the key (and SOFTWARE\Hayate) only when this run created them.
     #[test]
     #[ignore]
     fn real_hklm_proof_round_trip() {
         use crate::startup::adopt::{self, Released, WRITES};
         use crate::startup::model::{App, Own, OwnState};
         use crate::startup::store::Store;
-        if std::env::var("BLINK_REAL_HKLM_PROOF").as_deref() != Ok("1") {
-            eprintln!("skipped: set BLINK_REAL_HKLM_PROOF=1 (elevated, test machine only)");
+        if crate::osutil::env_var("REAL_HKLM_PROOF").as_deref() != Ok("1") {
+            eprintln!("skipped: set HAYATE_REAL_HKLM_PROOF=1 (elevated, rig only)");
             return;
         }
         assert!(crate::osutil::is_elevated(), "must run elevated");
         let loc = Locations::system();
         let tag = format!("{}-{}", std::process::id(), approved::filetime_now() % 1_000_000_007);
-        let fake = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, format!("zz-blinkproof-{tag}"));
-        let forged = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, format!("zz-blinkproof-{tag}-forged"));
+        let fake = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, format!("zz-hayateproof-{tag}"));
+        let forged = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, format!("zz-hayateproof-{tag}-forged"));
         let approved_path = Locations::approved_path(&fake);
         let exists = |p: &str| reg::open(loc.hklm, p, KEY_READ | KEY_WOW64_64KEY).is_ok();
         let (had_parent, had_key, had_approved) = (exists(PARENT), exists(KEY), exists(&approved_path));
@@ -520,12 +520,12 @@ mod tests {
                 }
             }
         }
-        let dir = std::env::temp_dir().join(format!("blinkproof-{tag}"));
+        let dir = std::env::temp_dir().join(format!("hayateproof-{tag}"));
         let _guard = Cleanup { fake: fake.clone(), forged: forged.clone(), had_parent, had_key, had_approved, approved_path: approved_path.clone(), dir: dir.clone() };
         let writes = || WRITES.with(|w| std::mem::take(&mut *w.borrow_mut()));
         let live = |id: &EntryId| approved::read(&loc, id).unwrap().approved;
 
-        // 1. the fake entry, "disabled by Blink", and its protected copy (adopt step 3b)
+        // 1. the fake entry, "disabled by Hayate", and its protected copy (adopt step 3b)
         let now = approved::filetime_now();
         let written = approved::disabled_bytes(now);
         let original = approved::enabled_bytes();
@@ -565,7 +565,7 @@ mod tests {
             store
                 .update_sync(|c| {
                     let fid = c.fresh_id();
-                    let mut a = App::new(fid.clone(), format!("zz-blinkproof {fid}"), r"C:\nope\zz-blinkproof.exe".into());
+                    let mut a = App::new(fid.clone(), format!("zz-hayateproof {fid}"), r"C:\nope\zz-hayateproof.exe".into());
                     a.own = Some(Own { source: source.clone(), state, original: o.clone(), written: w.clone(), raw_at_adopt: String::new() });
                     id = a.id.clone();
                     c.apps.push(a);
@@ -599,7 +599,7 @@ mod tests {
         assert!(check(&loc, &fake, &written, Some(&original)).is_err(), "copy removed after the proven restore");
         println!("4. legit give-back: Restored, copy removed");
 
-        // 5. changed outside Blink: record dropped, its own copy removed (new in Job A)
+        // 5. changed outside Hayate: record dropped, its own copy removed (new in Job A)
         let w2 = approved::disabled_bytes(now + 2);
         save(&loc, &fake, &w2, Some(&original)).unwrap();
         let app = add(&fake, OwnState::Owned, w2.clone(), Some(original.clone()));

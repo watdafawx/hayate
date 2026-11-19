@@ -3,20 +3,20 @@
 //! Parsing is a port of Launchpad's (quoted path, unquoted path with spaces
 //! ending in a program extension, existing bare file, `shell:` URI, Squirrel
 //! `Update.exe --processStart`). Starting is NOT: Launchpad is always a normal
-//! user process, Blink can be elevated, so the way a program is started is a
+//! user process, Hayate can be elevated, so the way a program is started is a
 //! policy decision made here, in one place:
 //!
 //! * not Admin -> the normal interactive user token, always
-//!   (`rules::actions::launch_as_user`: Explorer when Blink is elevated, the
+//!   (`rules::actions::launch_as_user`: Explorer when Hayate is elevated, the
 //!   verified shell token as the only fallback, never CreateProcess with
-//!   Blink's own token);
-//! * Admin -> explicit `runas`, only from a Blink that is NOT already elevated
-//!   (from an elevated Blink `runas` would start elevated code from a per-user
+//!   Hayate's own token);
+//! * Admin -> explicit `runas`, only from a Hayate that is NOT already elevated
+//!   (from an elevated Hayate `runas` would start elevated code from a per-user
 //!   config file, so it is refused), and only from an explicit button
 //!   (Run now / Run all now): never from the automatic logon run. Whether
 //!   `runas` shows a UAC prompt is Windows policy (ConsentPromptBehaviorAdmin
-//!   can make it silent), so Blink does not promise a prompt.
-//! * If Blink cannot tell whether it is elevated, nothing is started.
+//!   can make it silent), so Hayate does not promise a prompt.
+//! * If Hayate cannot tell whether it is elevated, nothing is started.
 //!
 //! Nothing here builds a shell command: the program and its arguments are two
 //! strings handed to the OS API.
@@ -214,9 +214,9 @@ pub enum Route {
     Refuse(&'static str),
 }
 
-/// `blink_elevated` None = the token could not be read: fail closed.
-pub fn route(admin: bool, blink_elevated: Option<bool>) -> Route {
-    match (admin, blink_elevated) {
+/// `hayate_elevated` None = the token could not be read: fail closed.
+pub fn route(admin: bool, hayate_elevated: Option<bool>) -> Route {
+    match (admin, hayate_elevated) {
         (_, None) => Route::Refuse("Hayate could not tell whether it is running as administrator, so it started nothing."),
         (false, Some(_)) => Route::User,
         (true, Some(false)) => Route::Uac,
@@ -247,7 +247,7 @@ fn shell_exec(verb: &str, file: &str, args: &str, cwd: Option<&str>) -> Result<(
 }
 
 /// Open a shortcut / URL / `shell:` item or bare program name with the shell.
-/// Only called from a Blink that is not elevated (see `launch_as_user`).
+/// Only called from a Hayate that is not elevated (see `launch_as_user`).
 pub fn shell_open(file: &str, args: &str, cwd: Option<&str>) -> Result<(), String> {
     shell_exec("open", file, args, cwd)
 }
@@ -298,8 +298,8 @@ mod tests {
         let u = prepare(r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App").unwrap();
         assert!(u.shell && u.cwd.is_none());
         assert!(prepare("notepad.exe").unwrap().shell, "a bare name goes through the shell's resolution, not CreateProcess's search order");
-        std::env::set_var("BLINK_FX_DIR", r"C:\Fx Dir");
-        assert_eq!(prepare(r"%BLINK_FX_DIR%\a.exe /s").unwrap().file, r"C:\Fx Dir\a.exe");
+        std::env::set_var("HAYATE_FX_DIR", r"C:\Fx Dir");
+        assert_eq!(prepare(r"%HAYATE_FX_DIR%\a.exe /s").unwrap().file, r"C:\Fx Dir\a.exe");
     }
 
     #[test]
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn admin_needs_a_prompt_and_never_from_an_elevated_blink() {
+    fn admin_needs_a_prompt_and_never_from_an_elevated_hayate() {
         assert_eq!(route(false, Some(false)), Route::User);
         assert_eq!(route(false, Some(true)), Route::User, "non-admin from an elevated Hayate is still the normal user token");
         assert_eq!(route(true, Some(false)), Route::Uac);
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn an_existing_file_anchors_an_otherwise_ambiguous_path() {
-        let d = std::env::temp_dir().join(format!("BlinkStartupFixture-launch-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("HayateStartupFixture-launch-{}", std::process::id()));
         let dir = d.join("a.exe b"); // a FOLDER whose name starts like a program
         std::fs::create_dir_all(&dir).unwrap();
         let real = dir.join("real.exe");

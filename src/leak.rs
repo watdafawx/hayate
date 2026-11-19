@@ -10,12 +10,12 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// Seconds between feeds (the sampler's cadence). Debug builds can shorten it
-/// with BLINK_LEAKSTEP=<s> to test end to end without waiting 20 minutes.
+/// with HAYATE_LEAKSTEP=<s> to test end to end without waiting 20 minutes.
 pub fn step_s() -> u64 {
     #[cfg(debug_assertions)]
     {
         static STEP: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-        return *STEP.get_or_init(|| std::env::var("BLINK_LEAKSTEP").ok().and_then(|v| v.parse().ok()).filter(|v| *v >= 1).unwrap_or(30));
+        return *STEP.get_or_init(|| crate::osutil::env_var("LEAKSTEP").ok().and_then(|v| v.parse().ok()).filter(|v| *v >= 1).unwrap_or(30));
     }
     #[cfg(not(debug_assertions))]
     30

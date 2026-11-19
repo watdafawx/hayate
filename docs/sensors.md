@@ -1,7 +1,7 @@
 # Vitals sensor panels
 
 CPU, GPU and per-disk details include Sensors directly below their headers,
-following the design mock. The rail has seven tabs. Each panel
+following `docs/mock-vitals-sensors.html`. The rail has seven tabs. Each panel
 has a 1m / 10m / 1h chart and channel rows with sparklines, range bars,
 current values and min–max. Temperature charts mark WARM/HOT thresholds:
 CPU 80/90 °C, GPU 80/88, SSD 60/70, HDD 45/55 (1 °C hysteresis).
@@ -15,7 +15,7 @@ and the History tab remain intact. Drive queries retain their existing
 15-second visible-window cadence; no always-on drive polling was added.
 SATA SSD/HDD classification uses the existing seek-penalty flag.
 
-Debug builds: `BLINK_TAB=1` opens Vitals (`3` now opens History). Relaunch IDs
+Debug builds: `HAYATE_TAB=1` opens Vitals (`3` now opens History). Relaunch IDs
 retain old numbering: an old Sensors selection restores Vitals; other tab
 selections survive updates unchanged.
 
@@ -31,7 +31,7 @@ Sources:
 
 ## PawnIO integration
 
-Blink loads PawnIO at runtime with `LoadLibraryW`/`GetProcAddress` and calls
+Hayate loads PawnIO at runtime with `LoadLibraryW`/`GetProcAddress` and calls
 only the documented user-mode API (`pawnio_open`, `pawnio_load`,
 `pawnio_execute`, `pawnio_close`). It never installs, starts, or otherwise
 touches the PawnIO driver or service. If `PawnIOLib.dll` is missing or the
@@ -114,4 +114,4 @@ torn read (e.g. a race with another tool) is discarded rather than displayed.
 - PawnIO is not bundled. The Vitals CPU panel offers **Install PawnIO** (`winget install -e --id namazso.PawnIO`, UAC prompt) when `PawnIOLib.dll` is not found under `%ProgramFiles%\PawnIO`.
 - `pawnio_open` fails with access denied unless the process is elevated. The CPU panel then offers **Restart as admin**: a UAC-prompted relaunch (`--wait-pid <old pid>` so the new copy waits for the old one to exit). Nothing elevates silently and there is no logon task.
 - Without PawnIO or admin, GPU and drive temperatures still work.
-- Test headless on a machine: `blink.exe --test-cpu-temp` (debug builds), plain and under `gsudo`. Test machine 5900X read 61.2 C elevated.
+- Test headless on a machine: `hayate.exe --test-cpu-temp` (debug builds), plain and under `gsudo`. Rig 5900X read 61.2 C elevated.

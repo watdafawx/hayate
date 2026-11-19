@@ -64,7 +64,7 @@ struct Fake {
 impl Fake {
     fn new() -> Arc<Fake> {
         Arc::new(Fake {
-            inp: Mutex::new(Inputs { at: Where::User, exe: r"C:\Blink\blink.exe".into(), aumid: "Blink.Test".into(), enabled: true, multi: false, test: false }),
+            inp: Mutex::new(Inputs { at: Where::User, exe: r"C:\Hayate\hayate.exe".into(), aumid: "Hayate.Test".into(), enabled: true, multi: false, test: false }),
             state: Mutex::new(None),
             list: Mutex::new(None),
             events: Mutex::new(Vec::new()),

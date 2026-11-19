@@ -1,4 +1,4 @@
-//! History tab (v2, the design mock): range chips, a summary strip
+//! History tab (v2, `docs/mock-history-v2.html`): range chips, a summary strip
 //! (now / avg / peak), memory-growth suspects, then one graph panel per series
 //! recorded by `crate::history` (per-second samples kept in RAM, one hour).
 //! The crosshair is synced across all panels by sample age. Nothing here

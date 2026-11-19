@@ -1,8 +1,8 @@
 //! Rules: per-process "always" settings (Process Lasso replacement).
 //!
-//! Rules live in `%LOCALAPPDATA%\Blink\rules.ini` (plain text, see model.rs).
+//! Rules live in `%LOCALAPPDATA%\Hayate\rules.ini` (plain text, see model.rs).
 //! They apply in the ETW ProcessStart callback, once per process start, and
-//! to already-running processes when Blink starts or a rule is added/edited.
+//! to already-running processes when Hayate starts or a rule is added/edited.
 //! Never retried: a refusal is recorded in the rule's last result.
 #![allow(dead_code)]
 
@@ -142,7 +142,7 @@ impl Engine {
     /// A thread that cannot start is surfaced through `worker_problem` (no rule may then claim
     /// to be ON), never ignored.
     fn start_worker(self: &Arc<Engine>) {
-        self.start_worker_with(&|body| std::thread::Builder::new().name("blink-disallow".into()).stack_size(512 * 1024).spawn(body).map(|_| ()));
+        self.start_worker_with(&|body| std::thread::Builder::new().name("hayate-disallow".into()).stack_size(512 * 1024).spawn(body).map(|_| ()));
     }
 
     fn start_worker_with(self: &Arc<Engine>, spawn: &dyn Fn(Box<dyn FnOnce() + Send>) -> std::io::Result<()>) {
@@ -519,7 +519,7 @@ impl Engine {
         }
     }
 
-    /// Blink exit: restore power plan, drop sleep requests, flush stats.
+    /// Hayate exit: restore power plan, drop sleep requests, flush stats.
     pub fn shutdown(&self) {
         apply::release_all();
         let mut g = self.inner.lock().unwrap();
@@ -590,9 +590,9 @@ pub fn start() -> Arc<Engine> {
         }
     });
     let e3 = e.clone();
-    let _ = std::thread::Builder::new().name("blink-rules-init".into()).stack_size(256 * 1024).spawn(move || {
+    let _ = std::thread::Builder::new().name("hayate-rules-init".into()).stack_size(256 * 1024).spawn(move || {
         e3.apply_running(None);
-        // processes already running when Blink starts (rules ending them were saved earlier)
+        // processes already running when Hayate starts (rules ending them were saved earlier)
         e3.submit(disallow::Job::Sweep(None));
     });
     e
@@ -640,7 +640,7 @@ mod tests {
     fn engine_with(rules: &[Rule]) -> Engine {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("blink-rules-test-{}-{}", std::process::id(), n));
+        let dir = std::env::temp_dir().join(format!("hayate-rules-test-{}-{}", std::process::id(), n));
         let _ = std::fs::create_dir_all(&dir);
         let f = dir.join("rules.ini");
         std::fs::write(&f, model::write_all(rules, &Settings::default())).unwrap();
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn delayed_start_never_matches_stale_path_with_same_basename() {
         let exe = std::env::current_exe().unwrap();
-        let stale = format!("C:\\blink-stale-event\\{}", exe.file_name().unwrap().to_string_lossy());
+        let stale = format!("C:\\hayate-stale-event\\{}", exe.file_name().unwrap().to_string_lossy());
         // Empty actions avoid changing the test process even on the old code.
         let e = engine_with(&[Rule::new(&stale, Actions::default())]);
         e.on_start(&ProcStart { pid: std::process::id(), ppid: 0, session: 0, path: stale, time: 0 });
@@ -721,7 +721,7 @@ mod tests {
         let e = engine_with(&[Rule::new("a.exe", Actions { io: Some(IoPriority::Low), ..Default::default() })]);
         let t = e.copy(1).unwrap();
         // paste onto a pattern that has no rule yet → new rule (apply_running finds nothing named zz_*.exe)
-        let ids = e.paste(&t, Some("zz_blink_test.exe")).unwrap();
+        let ids = e.paste(&t, Some("zz_hayate_test.exe")).unwrap();
         assert_eq!(ids, vec![2]);
         assert_eq!(e.get(2).unwrap().actions.io, Some(IoPriority::Low));
         assert!(e.paste("hello", None).is_err());
@@ -736,7 +736,7 @@ mod tests {
         if t.supported().is_err() {
             return;
         }
-        let name = "zz_blink_cpu_test.exe";
+        let name = "zz_hayate_cpu_test.exe";
         let one = 1u64 << t.valid.trailing_zeros();
         // invalid selections never reach rules.ini
         assert!(e.set_cpu_field(name, cpu::Kind::Affinity, Some(0)).is_err());
@@ -784,7 +784,7 @@ mod tests {
         fn new() -> Fixture {
             static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let dir = std::env::temp_dir().join(format!("blink-disallow-fixture-{}-{}", std::process::id(), n));
+            let dir = std::env::temp_dir().join(format!("hayate-disallow-fixture-{}-{}", std::process::id(), n));
             std::fs::create_dir_all(&dir).unwrap();
             Fixture { dir, kids: Vec::new() }
         }
@@ -930,10 +930,10 @@ mod tests {
     #[test]
     fn exact_path_scope_ends_that_file_only_through_a_verified_handle() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_a.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_a.exe", std::process::id());
         let target = f.exe(Some("one"), &name);
         let same_name_elsewhere = f.exe(Some("two"), &name);
-        let other = f.exe(None, &format!("zz_blink_disallow_{}_b.exe", std::process::id()));
+        let other = f.exe(None, &format!("zz_hayate_disallow_{}_b.exe", std::process::id()));
         let e = engine_with(&[Rule::new(&target, dis())]);
         let (pa, ca) = f.spawn(&target);
         let (pe, ce) = f.spawn(&same_name_elsewhere);
@@ -959,10 +959,10 @@ mod tests {
     #[test]
     fn exe_name_scope_ends_every_copy_and_the_sweep_finds_them_without_touching_others() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_n.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_n.exe", std::process::id());
         let c1 = f.exe(Some("one"), &name);
         let c2 = f.exe(Some("two"), &name);
-        let other = f.exe(None, &format!("zz_blink_disallow_{}_o.exe", std::process::id()));
+        let other = f.exe(None, &format!("zz_hayate_disallow_{}_o.exe", std::process::id()));
         let (p1, _) = f.spawn(&c1);
         let (p2, _) = f.spawn(&c2);
         let (po, _) = f.spawn(&other);
@@ -979,7 +979,7 @@ mod tests {
     #[test]
     fn a_disabled_or_overridden_rule_ends_nothing_even_on_a_sweep() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_d.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_d.exe", std::process::id());
         let exe = f.exe(None, &name);
         let (pid, create) = f.spawn(&exe);
         let mut off = Rule::new(&name, dis());
@@ -997,8 +997,8 @@ mod tests {
     #[test]
     fn a_start_event_is_only_a_hint_the_live_image_decides() {
         let mut f = Fixture::new();
-        let a = f.exe(None, &format!("zz_blink_disallow_{}_ev_a.exe", std::process::id()));
-        let b = f.exe(None, &format!("zz_blink_disallow_{}_ev_b.exe", std::process::id()));
+        let a = f.exe(None, &format!("zz_hayate_disallow_{}_ev_a.exe", std::process::id()));
+        let b = f.exe(None, &format!("zz_hayate_disallow_{}_ev_b.exe", std::process::id()));
         let (pa, _) = f.spawn(&a);
         let (pb, _) = f.spawn(&b);
         let e = engine_with(&[Rule::new(&a, dis())]);
@@ -1012,19 +1012,19 @@ mod tests {
     }
 
     #[test]
-    fn essential_blink_and_own_processes_are_never_ended_even_if_a_flag_gets_past_the_load_check() {
+    fn essential_hayate_and_own_processes_are_never_ended_even_if_a_flag_gets_past_the_load_check() {
         let mut f = Fixture::new();
-        // programs named like essential system / Blink programs, as disposable copies
+        // programs named like essential system / Hayate programs, as disposable copies
         let svc = f.exe(Some("a"), "svchost.exe");
-        let blink = f.exe(Some("b"), "blink-fixture.exe");
+        let hayate = f.exe(Some("b"), "hayate-fixture.exe");
         let (ps, cs) = f.spawn(&svc);
-        let (pb, cb) = f.spawn(&blink);
+        let (pb, cb) = f.spawn(&hayate);
         let me = std::env::current_exe().unwrap().to_string_lossy().into_owned();
         let my_create = osutil::identity(std::process::id()).unwrap().0;
         // loading drops these flags (see the load test); defence in depth: even with the flag forced on
         // in memory every ending is refused at run time
-        let e = engine_with(&[Rule::new("svchost.exe", dis()), Rule::new("blink-fixture.exe", dis()), Rule::new(&me, dis())]);
-        for p in ["svchost.exe", "blink-fixture.exe", me.as_str()] {
+        let e = engine_with(&[Rule::new("svchost.exe", dis()), Rule::new("hayate-fixture.exe", dis()), Rule::new(&me, dis())]);
+        for p in ["svchost.exe", "hayate-fixture.exe", me.as_str()] {
             force_flag(&e, p);
         }
         let (_, out) = e.enforce(ps, cs).expect("matched, refused");
@@ -1037,7 +1037,7 @@ mod tests {
         // and no such rule can be created through the editing API
         let e2 = engine_with(&[]);
         assert!(e2.set_disallow("svchost.exe", ENABLE).is_err());
-        assert!(e2.set_disallow("Blink.exe", ENABLE).is_err());
+        assert!(e2.set_disallow("Hayate.exe", ENABLE).is_err());
         assert!(e2.set_disallow(&me, ENABLE).is_err());
         assert!(e2.set_disallow(r"C:\Windows\System32\notepad.exe", ENABLE).is_err());
         assert!(e2.rules().is_empty());
@@ -1046,7 +1046,7 @@ mod tests {
     #[test]
     fn a_restart_storm_is_bounded_and_says_so() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_storm.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_storm.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = engine_with(&[Rule::new(&name, dis())]);
         // fill the window as a restart loop would
@@ -1076,7 +1076,7 @@ mod tests {
         assert!(e.set_disallow(r"games\g.exe", ENABLE).is_err(), "a path rule needs a full path");
         assert!(e.rules().is_empty());
         // off stays off; nothing is ended
-        let id = e.set_disallow("zz_blink_off_fixture.exe", KEEP_OFF).unwrap();
+        let id = e.set_disallow("zz_hayate_off_fixture.exe", KEEP_OFF).unwrap();
         assert!(id.created);
         assert!(!e.get(id.id).unwrap().enabled && e.get(id.id).unwrap().actions.disallow);
         assert!(!e.has_blocking());
@@ -1089,69 +1089,69 @@ mod tests {
     fn keep_off_never_touches_an_enabled_rule_and_keeps_a_disabled_rules_settings() {
         let e = engine_with(&[]);
         // REGRESSION: an enabled priority rule + "Save, keep OFF" must not disable or alter the rule
-        let kid = e.add(Rule::new("zz_blink_prio_fixture.exe", Actions { priority: Some(Priority::High), ..Default::default() }));
+        let kid = e.add(Rule::new("zz_hayate_prio_fixture.exe", Actions { priority: Some(Priority::High), ..Default::default() }));
         let before = e.get(kid).unwrap();
         assert!(before.enabled);
-        let err = e.set_disallow("ZZ_BLINK_PRIO_FIXTURE.EXE", KEEP_OFF).unwrap_err();
+        let err = e.set_disallow("ZZ_HAYATE_PRIO_FIXTURE.EXE", KEEP_OFF).unwrap_err();
         assert!(err.contains("enabled rule") && err.contains("nothing was changed"), "{err}");
         assert_eq!(e.get(kid).unwrap(), before, "priority rule still on, still High, no Disallow flag");
-        assert!(e.rule_for(r"C:\x\zz_blink_prio_fixture.exe").is_some_and(|r| r.actions.priority == Some(Priority::High)));
+        assert!(e.rule_for(r"C:\x\zz_hayate_prio_fixture.exe").is_some_and(|r| r.actions.priority == Some(Priority::High)));
         assert_eq!(e.rules().len(), 1, "same pattern, one rule");
         // a DISABLED rule: the flag is stored, the rule stays disabled, its settings stay saved
-        let mut r = Rule::new("zz_blink_keep_fixture.exe", Actions { priority: Some(Priority::Idle), ..Default::default() });
+        let mut r = Rule::new("zz_hayate_keep_fixture.exe", Actions { priority: Some(Priority::Idle), ..Default::default() });
         r.enabled = false;
         let did = e.add(r);
-        let saved = e.set_disallow("zz_blink_keep_fixture.exe", KEEP_OFF).unwrap();
+        let saved = e.set_disallow("zz_hayate_keep_fixture.exe", KEEP_OFF).unwrap();
         assert_eq!((saved.id, saved.created, saved.was_enabled), (did, false, false));
         let r = e.get(did).unwrap();
         assert!(!r.enabled && r.actions.disallow && r.actions.priority == Some(Priority::Idle));
         assert!(!e.has_blocking());
         // an already-enabled Disallow rule cannot be "kept off" either: it says it is ON
         e.set_enabled(did, true);
-        assert!(e.set_disallow("zz_blink_keep_fixture.exe", KEEP_OFF).unwrap_err().contains("it is ON"));
+        assert!(e.set_disallow("zz_hayate_keep_fixture.exe", KEEP_OFF).unwrap_err().contains("it is ON"));
         assert!(e.get(did).unwrap().enabled);
     }
 
     #[test]
     fn enabling_disallow_on_an_existing_rule_needs_an_explicit_whole_rule_confirmation() {
         let e = engine_with(&[]);
-        let mut r = Rule::new("zz_blink_whole_fixture.exe", Actions { priority: Some(Priority::Idle), ..Default::default() });
+        let mut r = Rule::new("zz_hayate_whole_fixture.exe", Actions { priority: Some(Priority::Idle), ..Default::default() });
         r.enabled = false;
         let off = e.add(r);
         let ask = disallow::DisallowMode::Enable { confirm_whole_rule: false };
-        let ctx = e.disallow_context("zz_blink_whole_fixture.exe");
+        let ctx = e.disallow_context("zz_hayate_whole_fixture.exe");
         assert_eq!((ctx.id, ctx.enabled, ctx.flag, ctx.other.as_str()), (Some(off), false, false, "Idle"));
-        let err = e.set_disallow("zz_blink_whole_fixture.exe", ask).unwrap_err();
+        let err = e.set_disallow("zz_hayate_whole_fixture.exe", ask).unwrap_err();
         assert!(err.contains("WHOLE rule") && err.contains("currently OFF"), "{err}");
         assert!(!e.get(off).unwrap().enabled && !e.get(off).unwrap().actions.disallow, "an unconfirmed ask changed nothing");
-        let saved = e.set_disallow("zz_blink_whole_fixture.exe", ENABLE).unwrap();
+        let saved = e.set_disallow("zz_hayate_whole_fixture.exe", ENABLE).unwrap();
         assert!(!saved.was_enabled);
         let r = e.get(off).unwrap();
         assert!(r.enabled && r.actions.disallow && r.actions.priority == Some(Priority::Idle), "settings stay saved");
         // the rule now blocks: block wins, the saved priority is not applied (and not lost)
-        assert!(e.rule_for(r"C:\x\zz_blink_whole_fixture.exe").is_some_and(|r| r.blocks()));
+        assert!(e.rule_for(r"C:\x\zz_hayate_whole_fixture.exe").is_some_and(|r| r.blocks()));
         // UNDO with the remembered switch: Disallow goes, the rule goes back to OFF, its priority does NOT start applying
         assert!(e.clear_disallow(off, Some(saved.was_enabled)));
         let r = e.get(off).unwrap();
         assert!(!r.actions.disallow && !r.enabled && r.actions.priority == Some(Priority::Idle));
-        assert!(e.rule_for(r"C:\x\zz_blink_whole_fixture.exe").is_none(), "undo did not silently turn the other settings on");
+        assert!(e.rule_for(r"C:\x\zz_hayate_whole_fixture.exe").is_none(), "undo did not silently turn the other settings on");
         // an ENABLED rule with settings needs the same confirmation (its priority stops applying)
-        let on = e.add(Rule::new("zz_blink_whole2_fixture.exe", Actions { priority: Some(Priority::High), ..Default::default() }));
-        assert!(e.set_disallow("zz_blink_whole2_fixture.exe", ask).unwrap_err().contains("stops those settings"));
+        let on = e.add(Rule::new("zz_hayate_whole2_fixture.exe", Actions { priority: Some(Priority::High), ..Default::default() }));
+        assert!(e.set_disallow("zz_hayate_whole2_fixture.exe", ask).unwrap_err().contains("stops those settings"));
         assert!(e.get(on).unwrap().actions.priority == Some(Priority::High) && !e.get(on).unwrap().actions.disallow);
-        let s2 = e.set_disallow("zz_blink_whole2_fixture.exe", ENABLE).unwrap();
+        let s2 = e.set_disallow("zz_hayate_whole2_fixture.exe", ENABLE).unwrap();
         assert!(s2.was_enabled);
         assert!(e.clear_disallow(on, Some(true)));
         assert!(e.get(on).unwrap().enabled && e.get(on).unwrap().actions.priority == Some(Priority::High));
         // a rule that is only Disallow needs no ask (nothing else to change)
-        let only = e.set_disallow("zz_blink_only_fixture.exe", KEEP_OFF).unwrap();
-        assert!(e.set_disallow("zz_blink_only_fixture.exe", ask).is_ok());
+        let only = e.set_disallow("zz_hayate_only_fixture.exe", KEEP_OFF).unwrap();
+        assert!(e.set_disallow("zz_hayate_only_fixture.exe", ask).is_ok());
         assert!(e.get(only.id).unwrap().enabled);
     }
 
     #[test]
     fn disallow_rules_in_the_clipboard_arrive_off_and_never_move_between_programs() {
-        let e = engine_with(&[Rule::new("zz_blink_src.exe", Actions { disallow: true, io: Some(IoPriority::Low), ..Default::default() })]);
+        let e = engine_with(&[Rule::new("zz_hayate_src.exe", Actions { disallow: true, io: Some(IoPriority::Low), ..Default::default() })]);
         let text = e.copy(1).unwrap();
         assert!(text.contains("disallow = true"));
         // paste as new rules: imported OFF
@@ -1159,12 +1159,12 @@ mod tests {
         let pasted = e.get(ids[0]).unwrap();
         assert!(pasted.actions.disallow && !pasted.enabled, "{pasted:?}");
         // paste onto another program: the settings move, the block does not
-        let ids = e.paste(&text, Some("zz_blink_dst.exe")).unwrap();
+        let ids = e.paste(&text, Some("zz_hayate_dst.exe")).unwrap();
         let dst = e.get(ids[0]).unwrap();
         assert!(!dst.actions.disallow && dst.actions.io == Some(IoPriority::Low));
         // paste onto a program that already has a block keeps it
-        let kid = e.add(Rule::new("zz_blink_keep2.exe", dis()));
-        e.paste(&text, Some("zz_blink_keep2.exe")).unwrap();
+        let kid = e.add(Rule::new("zz_hayate_keep2.exe", dis()));
+        e.paste(&text, Some("zz_hayate_keep2.exe")).unwrap();
         assert!(e.get(kid).unwrap().actions.disallow);
     }
 
@@ -1175,9 +1175,9 @@ mod tests {
         assert!(!e.get(id).unwrap().actions.disallow, "glob");
         let id = e.add(Rule::new("csrss.exe", dis()));
         assert!(!e.get(id).unwrap().actions.disallow, "essential");
-        let id = e.add(Rule::new("zz_blink_ok.exe", Actions { io: Some(IoPriority::Low), ..Default::default() }));
+        let id = e.add(Rule::new("zz_hayate_ok.exe", Actions { io: Some(IoPriority::Low), ..Default::default() }));
         let mut r = e.get(id).unwrap();
-        r.pattern = "zz_blink_*.exe".into();
+        r.pattern = "zz_hayate_*.exe".into();
         r.actions.disallow = true;
         assert!(e.update(r));
         assert!(!e.get(id).unwrap().actions.disallow);
@@ -1189,15 +1189,15 @@ mod tests {
         let e = engine_with(&[]);
         let tmp = e.file.with_extension("tmp");
         std::fs::create_dir(&tmp).unwrap();
-        e.set_disallow("zz_blink_persist.exe", KEEP_OFF).unwrap();
+        e.set_disallow("zz_hayate_persist.exe", KEEP_OFF).unwrap();
         let st = e.persistence().unwrap();
         assert!(matches!(&*st.lock().unwrap(), Some(Err(_))), "the failure is visible, not swallowed");
-        assert!(!std::fs::read_to_string(&e.file).unwrap_or_default().contains("zz_blink_persist"), "nothing reached the disk");
+        assert!(!std::fs::read_to_string(&e.file).unwrap_or_default().contains("zz_hayate_persist"), "nothing reached the disk");
         std::fs::remove_dir(&tmp).unwrap();
-        e.set_disallow("zz_blink_persist.exe", KEEP_OFF).unwrap();
+        e.set_disallow("zz_hayate_persist.exe", KEEP_OFF).unwrap();
         assert!(matches!(&*e.persistence().unwrap().lock().unwrap(), Some(Ok(()))));
         let text = std::fs::read_to_string(&e.file).unwrap();
-        assert!(text.contains("pattern = zz_blink_persist.exe") && text.contains("disallow = true") && text.contains("enabled = false"), "{text}");
+        assert!(text.contains("pattern = zz_hayate_persist.exe") && text.contains("disallow = true") && text.contains("enabled = false"), "{text}");
         // and a fresh engine reading that file sees the same rule, still off
         let e2 = Engine::load(e.file.clone());
         let r = e2.rules().remove(0);
@@ -1209,7 +1209,7 @@ mod tests {
     #[test]
     fn a_paused_rules_survivors_are_ended_when_the_pause_ends_with_no_new_event() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_cool.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_cool.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = arc(&[Rule::new(&name, dis())]);
         e.start_worker_with(&std_spawn);
@@ -1229,7 +1229,7 @@ mod tests {
     #[test]
     fn a_continuous_stream_of_jobs_cannot_starve_the_recovery() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_flood.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_flood.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = arc(&[Rule::new(&name, dis())]);
         e.start_worker_with(&std_spawn);
@@ -1252,7 +1252,7 @@ mod tests {
     #[test]
     fn repeated_overload_requeues_the_cooldown_and_never_ends_more_than_the_rate_allows() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_again.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_again.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = engine_with(&[Rule::new(&name, dis())]);
         let (a, _) = f.spawn(&exe);
@@ -1286,7 +1286,7 @@ mod tests {
     #[test]
     fn disabling_or_deleting_the_rule_cancels_its_cooldown_and_guard() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_cancel.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_cancel.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = engine_with(&[Rule::new(&name, dis())]);
         let (p1, _) = f.spawn(&exe);
@@ -1321,7 +1321,7 @@ mod tests {
 
     #[test]
     fn guards_follow_enable_edit_clear_and_never_outgrow_the_rule_list() {
-        let e = engine_with(&[Rule::new("zz_blink_g1.exe", dis()), Rule::new("zz_blink_g2.exe", dis())]);
+        let e = engine_with(&[Rule::new("zz_hayate_g1.exe", dis()), Rule::new("zz_hayate_g2.exe", dis())]);
         {
             let mut r = e.guards.lock().unwrap();
             r.rules.entry(1).or_default().settle((9, 9));
@@ -1329,7 +1329,7 @@ mod tests {
         }
         // editing a rule starts it over (its settled answers do not carry across)
         let mut r = e.get(1).unwrap();
-        r.pattern = "zz_blink_g1b.exe".into();
+        r.pattern = "zz_hayate_g1b.exe".into();
         assert!(e.update(r));
         assert!(!e.guards.lock().unwrap().rules.contains_key(&1));
         assert!(e.guards.lock().unwrap().rules.contains_key(&2), "the other rule's guard is untouched");
@@ -1347,7 +1347,7 @@ mod tests {
     #[test]
     fn a_full_queue_marks_one_coalesced_recovery_that_reconciles_through_the_usual_rate_path() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_over.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_over.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = engine_with(&[Rule::new(&name, dis())]);
         // a worker that never drains: capacity 1
@@ -1386,7 +1386,7 @@ mod tests {
     #[test]
     fn a_worker_that_cannot_start_or_has_stopped_is_surfaced_not_silent() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_nowork.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_nowork.exe", std::process::id());
         let exe = f.exe(None, &name);
         let (p1, _) = f.spawn(&exe);
         let e = arc(&[Rule::new(&name, dis())]);
@@ -1397,9 +1397,9 @@ mod tests {
         e.submit(disallow::Job::Sweep(None));
         e.submit(disallow::Job::Start { pid: p1, create: osutil::identity(p1).unwrap().0 });
         assert!(f.alive(p1));
-        let err = e.set_disallow("zz_blink_newrule.exe", ENABLE).unwrap_err();
+        let err = e.set_disallow("zz_hayate_newrule.exe", ENABLE).unwrap_err();
         assert!(err.contains("cannot run"), "{err}");
-        assert!(e.set_disallow("zz_blink_newrule.exe", KEEP_OFF).is_ok(), "saving OFF is still honest");
+        assert!(e.set_disallow("zz_hayate_newrule.exe", KEEP_OFF).is_ok(), "saving OFF is still honest");
         // a worker thread that dies is noticed on the next job
         let e2 = arc(&[]);
         let (tx, rx) = std::sync::mpsc::sync_channel::<disallow::Job>(4);
@@ -1412,8 +1412,8 @@ mod tests {
     #[test]
     fn access_denied_and_protected_answers_are_final_for_that_instance_and_pruned_when_it_exits() {
         let mut f = Fixture::new();
-        // a Blink-named program is always refused (a unique name, so no real process matches the rule)
-        let name = format!("blink-zz-disallow-{}.exe", std::process::id());
+        // a Hayate-named program is always refused (a unique name, so no real process matches the rule)
+        let name = format!("hayate-zz-disallow-{}.exe", std::process::id());
         let svc = f.exe(Some("a"), &name);
         let (p, c) = f.spawn(&svc);
         let e = engine_with(&[Rule::new(&name, dis())]);
@@ -1436,7 +1436,7 @@ mod tests {
     #[test]
     fn disabling_before_the_final_check_ends_nothing() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_race1.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_race1.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = arc(&[Rule::new(&name, dis())]);
         let (p, c) = f.spawn(&exe);
@@ -1452,7 +1452,7 @@ mod tests {
     #[test]
     fn a_disable_cannot_slip_between_the_final_check_and_the_terminate_call() {
         let mut f = Fixture::new();
-        let name = format!("zz_blink_disallow_{}_race2.exe", std::process::id());
+        let name = format!("zz_hayate_disallow_{}_race2.exe", std::process::id());
         let exe = f.exe(None, &name);
         let e = arc(&[Rule::new(&name, dis())]);
         let (p, c) = f.spawn(&exe);
@@ -1482,12 +1482,12 @@ mod tests {
 
     #[test]
     fn a_protected_or_glob_disallow_in_the_file_is_dropped_at_load_with_a_visible_warning_never_shown_on() {
-        let dir = std::env::temp_dir().join(format!("blink-rules-load-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("hayate-rules-load-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let f = dir.join("rules.ini");
         std::fs::write(
             &f,
-            "[rule]\npattern = svchost.exe\nenabled = true\ndisallow = true\n\n[rule]\npattern = C:\\Windows\\System32\\notepad.exe\nenabled = true\ndisallow = true\npriority = high\n\n[rule]\npattern = blink-x.exe\nenabled = true\ndisallow = true\n\n[rule]\npattern = zz_blink_fine.exe\nenabled = true\ndisallow = true\n\n[rule]\npattern = C:\\Windows\\.\\System32\\.\\calc.exe\nenabled = true\ndisallow = true\n",
+            "[rule]\npattern = svchost.exe\nenabled = true\ndisallow = true\n\n[rule]\npattern = C:\\Windows\\System32\\notepad.exe\nenabled = true\ndisallow = true\npriority = high\n\n[rule]\npattern = hayate-x.exe\nenabled = true\ndisallow = true\n\n[rule]\npattern = zz_hayate_fine.exe\nenabled = true\ndisallow = true\n\n[rule]\npattern = C:\\Windows\\.\\System32\\.\\calc.exe\nenabled = true\ndisallow = true\n",
         )
         .unwrap();
         let e = Engine::load(f);
@@ -1508,13 +1508,13 @@ mod tests {
         let id = e.add(Rule::new("csrss.exe", dis()));
         assert!(!e.get(id).unwrap().actions.disallow);
         assert!(e.warnings().iter().any(|w| w.contains("csrss.exe") && w.contains("Disallow ignored")), "{:?}", e.warnings());
-        let id = e.add(Rule::new("zz_blink_*.exe", dis()));
-        assert!(e.warnings().iter().any(|w| w.contains("zz_blink_*.exe") && w.contains("never be disallowed")), "{:?}", e.warnings());
+        let id = e.add(Rule::new("zz_hayate_*.exe", dis()));
+        assert!(e.warnings().iter().any(|w| w.contains("zz_hayate_*.exe") && w.contains("never be disallowed")), "{:?}", e.warnings());
         let mut r = e.get(id).unwrap();
-        r.pattern = "blink-update.exe".into();
+        r.pattern = "hayate-update.exe".into();
         r.actions.disallow = true;
         e.update(r);
-        assert!(e.warnings().iter().any(|w| w.contains("blink-update.exe")));
+        assert!(e.warnings().iter().any(|w| w.contains("hayate-update.exe")));
         // the list stays short and has no repeats
         for _ in 0..50 {
             e.add(Rule::new("csrss.exe", dis()));
@@ -1528,16 +1528,16 @@ mod tests {
         let e = engine_with(&[]);
         let tmp = e.file.with_extension("tmp");
         std::fs::create_dir(&tmp).unwrap();
-        let saved = e.set_disallow("zz_blink_retry_fixture.exe", ENABLE).unwrap();
+        let saved = e.set_disallow("zz_hayate_retry_fixture.exe", ENABLE).unwrap();
         assert!(e.get(saved.id).unwrap().blocks(), "on in memory");
         assert!(matches!(&*e.persistence().unwrap().lock().unwrap(), Some(Err(_))));
-        assert!(!std::fs::read_to_string(&e.file).unwrap_or_default().contains("zz_blink_retry_fixture"));
+        assert!(!std::fs::read_to_string(&e.file).unwrap_or_default().contains("zz_hayate_retry_fixture"));
         std::fs::remove_dir(&tmp).unwrap();
         // nothing about the rule changes; the retry still performs an actual write
         let status = e.save_again();
         assert!(matches!(&*status.lock().unwrap(), Some(Ok(()))));
         let text = std::fs::read_to_string(&e.file).unwrap();
-        assert!(text.contains("pattern = zz_blink_retry_fixture.exe") && text.contains("disallow = true") && text.contains("enabled = true"), "{text}");
+        assert!(text.contains("pattern = zz_hayate_retry_fixture.exe") && text.contains("disallow = true") && text.contains("enabled = true"), "{text}");
     }
 
     #[test]

@@ -241,7 +241,7 @@ pub fn parse_mem_lists(b: &[u8], page: u64) -> Option<MemLists> {
 }
 
 /// Free / modified / standby lists. Windows 11 answers this unelevated
-/// (checked on dev PC, 26300: status 0 from a standard token); older builds
+/// (checked on FOX, 26300: status 0 from a standard token); older builds
 /// want SeProfileSingleProcessPrivilege, which only an elevated token holds,
 /// so a failed query is retried once with it enabled. Still failing: None,
 /// and the composition view hides those fields. One syscall (~2 us), only

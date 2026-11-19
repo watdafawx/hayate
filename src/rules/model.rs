@@ -114,7 +114,7 @@ pub struct Actions {
     /// power plan while running, restored when the last match exits
     pub power_plan: Option<GUID>,
     pub keep_awake: Option<Awake>,
-    /// "Disallow running": Blink ends a matching process after it starts. NOT a
+    /// "Disallow running": Hayate ends a matching process after it starts. NOT a
     /// launch block. Honoured only for exe-name and exact-path rules (never globs)
     /// and only while the rule is enabled. When set, no other action is applied to
     /// the matched process: the block wins. Default off; absent from older files.
@@ -233,7 +233,7 @@ pub fn kind_of(pattern: &str) -> MatchKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     /// Offer CCD0 (V-Cache) / CCD1 presets in rule pickers. Off by default:
-    /// Blink never applies CPU sets / affinity unless a rule says so.
+    /// Hayate never applies CPU sets / affinity unless a rule says so.
     pub ccd_presets_enabled: bool,
     /// ProBalance-like Restraint (v2, not implemented yet). Off.
     pub restraint_enabled: bool,

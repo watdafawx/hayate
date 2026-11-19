@@ -1,11 +1,11 @@
 //! "Disallow running" panel: the explicit confirmation for an opt-in rule that makes
-//! Blink END a program after it starts. Drawn over the tab body like the CPU panel (no
+//! Hayate END a program after it starts. Drawn over the tab body like the CPU panel (no
 //! dialog, nothing before a click). Opened from the process menu (Processes + Vitals Top)
 //! and from the Rules tab when a Disallow rule is switched on.
 //!
 //! What it says, on purpose: this is not a launch block. Windows still starts the
-//! program; Blink ends it after it has started, only while Blink runs, and only a
-//! program Blink may end. Opening the panel changes nothing. Success is only reported
+//! program; Hayate ends it after it has started, only while Hayate runs, and only a
+//! program Hayate may end. Opening the panel changes nothing. Success is only reported
 //! after the disk write is acknowledged; a failed or unconfirmed (timed out) write offers
 //! a real retry of the write, also when the change is already on in memory.
 //!
@@ -170,7 +170,7 @@ pub fn poll_save(status: &crate::rules::SaveStatus, since: Instant, now: Instant
 }
 
 /// Copies named like the chosen pattern in the LAST list refresh. A count of what was seen,
-/// not of what Blink will end.
+/// not of what Hayate will end.
 fn running_matches(app: &App, p: &DisallowPanel) -> usize {
     let pat = p.pattern();
     let by_path = crate::rules::model::kind_of(&pat) == crate::rules::model::MatchKind::Path;

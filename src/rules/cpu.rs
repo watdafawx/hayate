@@ -8,7 +8,7 @@
 //!   the process's threads. Not a hard limit; hard affinity takes precedence
 //!   and threads can carry their own selection. Needs only limited access.
 //!
-//! Group 0 only. Blink's rule format is one `u64` mask, so a PC with several
+//! Group 0 only. Hayate's rule format is one `u64` mask, so a PC with several
 //! processor groups (more than 64 logical CPUs in a group split) gets no CPU
 //! selection at all rather than a silently truncated one.
 
@@ -94,7 +94,7 @@ pub fn parse_cpu_sets(b: &[u8]) -> Vec<CpuEntry> {
     out
 }
 
-/// What Blink knows about this PC's logical CPUs.
+/// What Hayate knows about this PC's logical CPUs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Topology {
     /// active processor groups
@@ -123,7 +123,7 @@ impl Topology {
         self.valid.count_ones()
     }
 
-    /// Err(reason) when Blink cannot address this PC's CPUs faithfully.
+    /// Err(reason) when Hayate cannot address this PC's CPUs faithfully.
     pub fn supported(&self) -> Result<(), String> {
         if self.groups > 1 {
             return Err(format!(
@@ -181,7 +181,7 @@ pub fn topology() -> &'static Topology {
     T.get_or_init(query_topology)
 }
 
-/// (name, mask) per CCD (L3 group) when the PC has two or more and Blink can
+/// (name, mask) per CCD (L3 group) when the PC has two or more and Hayate can
 /// address it; read once.
 pub fn ccds() -> &'static [(String, u64)] {
     static C: OnceLock<Vec<(String, u64)>> = OnceLock::new();

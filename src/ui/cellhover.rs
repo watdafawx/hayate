@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn wrapped_text_is_the_exact_string_and_never_overflows() {
-        for s in [r"C:\Users\Alice\AppData\Local\Discord\app-1.0.9220\Discord.exe --processStart Discord.exe", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "ünïcödé 日本語 text that is long enough to wrap around", "short"] {
+        for s in [r"C:\Users\you\AppData\Local\Discord\app-1.0.9220\Discord.exe --processStart Discord.exe", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "ünïcödé 日本語 text that is long enough to wrap around", "short"] {
             let (lines, omitted) = wrap_hard(s, 100, fit10);
             assert_eq!(omitted, 0);
             assert!(lines.iter().all(|l| l.chars().count() <= 10), "{lines:?}");
@@ -1043,9 +1043,9 @@ mod tests {
     fn the_account_is_whatever_the_lookup_says_and_never_the_launcher() {
         let a = with_meta(proc(10, 0, 100, "a.exe"), r"C:\a.exe", "a.exe");
         let (pv, s) = view(vec![a]);
-        let known = |_: u32, _: i64| User::Known { name: r"WIN\Alice".into(), elevated: Some(false) };
+        let known = |_: u32, _: i64| User::Known { name: r"PC\you".into(), elevated: Some(false) };
         let d = build(&pv, &s, (10, 100, true), None, &known).unwrap();
-        assert_eq!(field(&d, "User").value, r"WIN\Alice");
+        assert_eq!(field(&d, "User").value, r"PC\you");
         assert_eq!(field(&d, "User").note.as_deref(), Some("Standard token"));
         let d = build(&pv, &s, (10, 100, true), None, &|_, _| User::Pending).unwrap();
         assert_eq!(field(&d, "User").value, "Looking up…");

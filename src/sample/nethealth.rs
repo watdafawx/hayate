@@ -6,7 +6,7 @@
 //! `read` runs on the I/O worker (bgio), once a second, only while the Network detail is
 //! visible. `Hist` lives on the sampler thread: it diffs the counters over 60 s and counts link
 //! flaps (up/down changes of the adapter list the sampler reads anyway, free of API calls).
-//! `diagnose` is the verdict from the design mock, pure and tested.
+//! `diagnose` is the verdict from the approved mock (docs/mock-net-health.html), pure and tested.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -22,7 +22,7 @@ const GAP: Duration = Duration::from_secs(5);
 /// Rates need at least this much span to mean anything.
 const MIN_SPAN: f64 = 3.0;
 
-// ---------- thresholds [warn, hot] (the design mock, "WARN / HOT at") ----------
+// ---------- thresholds [warn, hot] (docs/mock-net-health.html, "WARN / HOT at") ----------
 
 /// errors, or discards, in + out per 60 s
 pub const TH_ERR: [f64; 2] = [1.0, 10.0];
@@ -35,7 +35,7 @@ pub const TH_FAIL: [f64; 2] = [30.0, 90.0];
 pub const TH_RST: [f64; 2] = [60.0, 180.0];
 /// Wi-Fi signal, dBm; lower is worse
 pub const TH_SIG: [f64; 2] = [-67.0, -75.0];
-/// link down / up changes since Blink started
+/// link down / up changes since Hayate started
 pub const TH_FLAP: [f64; 2] = [1.0, 3.0];
 /// below this Mb/s both ways counts as "nothing is moving"
 pub const IDLE_MBPS: f64 = 0.5;
@@ -262,7 +262,7 @@ fn wlan(want: &[u64]) -> Vec<(u64, Wifi)> {
 pub struct AdapterHealth {
     pub luid: u64,
     pub up: bool,
-    /// link up/down changes Blink saw since it started
+    /// link up/down changes Hayate saw since it started
     pub flaps: u32,
     /// counter growth over `span_s` (at most 60 s)
     pub err_in: u64,

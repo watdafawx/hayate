@@ -147,7 +147,7 @@ pub struct Live {
     /// StartupApproved value of the entry's own scope (None = no value)
     pub approved: Option<Vec<u8>>,
     /// all-users entry only: the current user's own StartupApproved value
-    /// (Windows consults it too; Blink never writes it for an all-users entry)
+    /// (Windows consults it too; Hayate never writes it for an all-users entry)
     pub user_override: Option<Vec<u8>>,
 }
 
@@ -302,11 +302,11 @@ mod tests {
         let s = Scratch::new("approved");
         let tmp = std::env::temp_dir();
         let loc = loc_for(&s, &tmp);
-        let id = EntryId::new(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture A");
+        let id = EntryId::new(Kind::Run, Scope::User, View::Native, "HayateStartupFixture A");
         // the Run value, written by the test the way an installer would
         let run = reg::create(loc.hkcu, RUN, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY).unwrap();
         unsafe {
-            let n = crate::osutil::wide("BlinkStartupFixture A");
+            let n = crate::osutil::wide("HayateStartupFixture A");
             let v: Vec<u8> = crate::osutil::wide(r"C:\nope\fixture.exe").iter().flat_map(|c| c.to_le_bytes()).collect();
             assert_eq!(RegSetValueExW(run.0, crate::osutil::pcw(&n), None, REG_SZ, Some(&v)), windows::Win32::Foundation::ERROR_SUCCESS);
         }
@@ -329,11 +329,11 @@ mod tests {
     fn all_users_entry_reports_the_user_override() {
         let s = Scratch::new("override");
         let loc = loc_for(&s, &std::env::temp_dir());
-        let id = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "BlinkStartupFixture B");
+        let id = EntryId::new(Kind::Run, Scope::AllUsers, View::Native, "HayateStartupFixture B");
         write(&loc, &id, Some(&disabled_bytes(5))).unwrap(); // machine layer: disabled
         assert_eq!(read(&loc, &id).unwrap().effective(), State::Disabled);
         // the same name written for the current user (the user layer) wins
-        let user_id = EntryId::new(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture B");
+        let user_id = EntryId::new(Kind::Run, Scope::User, View::Native, "HayateStartupFixture B");
         write(&loc, &user_id, Some(&enabled_bytes())).unwrap();
         let live = read(&loc, &id).unwrap();
         assert_eq!(live.approved.as_deref(), Some(disabled_bytes(5).as_slice()));
@@ -345,7 +345,7 @@ mod tests {
     fn a_value_that_is_not_binary_is_unknown_never_enabled_or_disabled() {
         let s = Scratch::new("approved-type");
         let loc = loc_for(&s, &std::env::temp_dir());
-        let id = EntryId::new(Kind::Run, Scope::User, View::Native, "BlinkStartupFixture T");
+        let id = EntryId::new(Kind::Run, Scope::User, View::Native, "HayateStartupFixture T");
         let k = reg::create(loc.hkcu, &Locations::approved_path(&id), KEY_READ | KEY_WRITE | KEY_WOW64_64KEY).unwrap();
         let n = crate::osutil::wide(&id.key);
         // a future Windows could store a DWORD here; its meaning is not ours to guess
@@ -353,7 +353,7 @@ mod tests {
             assert_eq!(RegSetValueExW(k.0, crate::osutil::pcw(&n), None, REG_DWORD, Some(&[1u8, 0, 0, 0])), windows::Win32::Foundation::ERROR_SUCCESS);
         }
         assert_eq!(read(&loc, &id).unwrap().effective(), State::Unknown);
-        // twelve REG_BINARY-looking bytes stored as another type are still not a value Blink may rewrite
+        // twelve REG_BINARY-looking bytes stored as another type are still not a value Hayate may rewrite
         let twelve = disabled_bytes(5);
         unsafe {
             assert_eq!(RegSetValueExW(k.0, crate::osutil::pcw(&n), None, REG_QWORD, Some(&twelve[..8])), windows::Win32::Foundation::ERROR_SUCCESS);
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn folder_entry_presence_follows_the_file() {
         let s = Scratch::new("folder");
-        let dir = std::env::temp_dir().join(format!("BlinkStartupFixture-folder-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("HayateStartupFixture-folder-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("user")).unwrap();
         let loc = loc_for(&s, &dir);

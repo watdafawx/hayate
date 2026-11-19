@@ -1,5 +1,5 @@
 //! "Who is failing" inside NETWORK HEALTH, and the two-lane marks strip under the throughput graph.
-//! Port of the design mock (part 1). The data is `netetw::Feed::conn` (see `netconn.rs`
+//! Port of docs/mock-net-offenders.html (part 1). The data is `netetw::Feed::conn` (see `netconn.rs`
 //! for what each number means and why every kind is an inference); nothing here talks to Windows.
 
 use super::nethealth::{band, tag_chip, BAND_H};
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn the_readout_names_the_app_as_shown_not_the_lowercase_key() {
-        let mut ps = vec![pair(1, [10, 0, 0, 2], 25565, 40, 0, 0)];
+        let mut ps = vec![pair(1, [192, 168, 50, 2], 25565, 40, 0, 0)];
         let who2 = |pid: u32, _c: i64| (pid == 1).then(|| ("PowerShell 7".to_string(), 7usize));
         let rows = build_rows(&ps, &who2);
         assert_eq!(rows[0].key, "powershell 7");
@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn the_incident_observation_names_the_culprit_with_a_lowercase_kind() {
-        let pairs = vec![pair(1, [10, 0, 0, 2], 25565, 61, 0, 0)];
+        let pairs = vec![pair(1, [192, 168, 50, 2], 25565, 61, 0, 0)];
         let rows = build_rows(&pairs, &who);
         let o = incident_obs(true, "Degraded: connections failing", rows.first(), Some("C:\\x\\java.exe"));
         assert!(o.bad);
@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn rows_merge_by_app_and_remote_and_rank_by_score() {
-        let pairs = vec![pair(1, [10, 0, 0, 2], 25565, 40, 0, 0), pair(2, [10, 0, 0, 2], 25565, 21, 8, 0), pair(3, [8, 8, 8, 8], 443, 2, 40, 0), pair(4, [8, 8, 8, 8], 443, 99, 0, 0)];
+        let pairs = vec![pair(1, [192, 168, 50, 2], 25565, 40, 0, 0), pair(2, [192, 168, 50, 2], 25565, 21, 8, 0), pair(3, [8, 8, 8, 8], 443, 2, 40, 0), pair(4, [8, 8, 8, 8], 443, 99, 0, 0)];
         let rows = build_rows(&pairs, &who);
         assert_eq!(rows.len(), 2, "pid 4 is gone and skipped, the two java processes merge");
         let j = &rows[0];

@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn badge_never_exceeds_its_cell_and_never_shows_without_a_rule() {
         for gm in [GroupMark::Same(Mark::Rule(1)), GroupMark::Same(Mark::Off(1)), GroupMark::Mixed] {
-            // the narrowest column Blink allows is 40 px wide: 24 px of cell after the 8 px padding
+            // the narrowest column Hayate allows is 40 px wide: 24 px of cell after the 8 px padding
             for avail in [24.0f32, 30.0, 40.0, 54.0, 80.0, 400.0] {
                 let (_, w, _) = badge_fit(gm, avail).unwrap_or_else(|| panic!("{gm:?} must fit in {avail}"));
                 assert!(w <= avail, "{gm:?}: badge {w} in {avail}");

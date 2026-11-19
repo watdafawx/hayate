@@ -138,7 +138,7 @@ struct Layout {
 
 /// The first GPU device in a process takes ~200 ms (driver load and init;
 /// 190-250 ms on an RTX 3080), and the hide → release → show cycle pays it on
-/// every open. So it is made on a worker: Blink paints the open with a
+/// every open. So it is made on a worker: Hayate paints the open with a
 /// software target (~15 ms), starts the worker once that frame is shown, and
 /// when the warm device exists makes its GPU target (the driver is loaded by
 /// then: ~40 ms instead of ~200) and drops the warm device.
@@ -213,15 +213,15 @@ mod warm {
     }
 }
 
-/// After a GPU failure, how long Blink stays on the software path before a new
+/// After a GPU failure, how long Hayate stays on the software path before a new
 /// target (next open, or next loss) tries the GPU again.
 const GPU_RETRY: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// `BLINK_GPURENDER=0` forces the software (WARP) path; anything else, or
+/// `HAYATE_GPURENDER=0` forces the software (WARP) path; anything else, or
 /// unset, renders on the GPU with software as the fallback.
 fn gpu_allowed_by_env() -> bool {
     static A: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *A.get_or_init(|| std::env::var_os("BLINK_GPURENDER").is_none_or(|v| v != "0"))
+    *A.get_or_init(|| crate::osutil::env_var_os("GPURENDER").is_none_or(|v| v != "0"))
 }
 
 /// Policy: try the GPU unless forced off or it failed less than `GPU_RETRY` ago.
@@ -263,7 +263,7 @@ impl Gfx {
         }
         match (self.on_gpu, gpu_allowed_by_env(), self.gpu_failed.is_some()) {
             (true, _, _) => "hardware",
-            (false, false, _) => "software (BLINK_GPURENDER=0)",
+            (false, false, _) => "software (HAYATE_GPURENDER=0)",
             (false, true, true) => "software (GPU fallback)",
             (false, true, false) => "software",
         }
@@ -291,7 +291,7 @@ impl Gfx {
         }
     }
 
-    /// GPU by default. Software (WARP) when `BLINK_GPURENDER=0`, when the GPU
+    /// GPU by default. Software (WARP) when `HAYATE_GPURENDER=0`, when the GPU
     /// target cannot be made, and for `GPU_RETRY` after the device was lost:
     /// a hung or resetting GPU driver is when a task manager is needed most.
     /// Also software while the GPU device warms up on a worker (`warm`), so
@@ -370,7 +370,7 @@ impl Gfx {
     }
 
     /// Drop the render target and everything made from it. The GPU driver
-    /// keeps tens of MB committed per device; a hidden resident Blink should
+    /// keeps tens of MB committed per device; a hidden resident Hayate should
     /// not. Recreated lazily on the next paint.
     pub fn release(&mut self) {
         self.drop_target();
@@ -457,12 +457,12 @@ impl Gfx {
         let t0 = std::time::Instant::now();
         let r = unsafe { rt.EndDraw(None, None) };
         self.end_ms = t0.elapsed().as_secs_f32() * 1000.0;
-        // debug builds: BLINK_TEST_DEVICELOST=<n> reports frame n as a lost device
+        // debug builds: HAYATE_TEST_DEVICELOST=<n> reports frame n as a lost device
         #[cfg(debug_assertions)]
         let r = {
             static FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if std::env::var("BLINK_TEST_DEVICELOST").ok().and_then(|v| v.parse::<u32>().ok()) == Some(n) { Err(Error::from(D2DERR_RECREATE_TARGET)) } else { r }
+            if crate::osutil::env_var("TEST_DEVICELOST").ok().and_then(|v| v.parse::<u32>().ok()) == Some(n) { Err(Error::from(D2DERR_RECREATE_TARGET)) } else { r }
         };
         let Err(e) = r else {
             if self.warming {
@@ -828,7 +828,7 @@ mod tests {
     fn gpu_unless_forced_off_or_recently_failed() {
         let now = Instant::now() + Duration::from_secs(3600);
         assert!(want_gpu(true, None, now));
-        assert!(!want_gpu(false, None, now), "BLINK_GPURENDER=0 forces software");
+        assert!(!want_gpu(false, None, now), "HAYATE_GPURENDER=0 forces software");
         assert!(!want_gpu(true, Some(now - Duration::from_secs(10)), now), "software right after a GPU failure");
         assert!(want_gpu(true, Some(now - GPU_RETRY), now), "GPU again once GPU_RETRY has passed");
         assert!(!want_gpu(false, Some(now - GPU_RETRY), now));

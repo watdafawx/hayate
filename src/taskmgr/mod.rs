@@ -1,21 +1,21 @@
-//! Opt-in "open Blink instead of Task Manager" (docs/task-manager-replacement.md).
+//! Opt-in "open Hayate instead of Task Manager" (docs/task-manager-replacement.md).
 //!
-//! * Settings toggle -> UAC -> `blink.exe --taskmgr-enable` (elevated helper):
-//!   copies itself to `%ProgramFiles%\Blink\blink-tm.exe`, checks that nobody
+//! * Settings toggle -> UAC -> `hayate.exe --taskmgr-enable` (elevated helper):
+//!   copies itself to `%ProgramFiles%\Hayate\hayate-tm.exe`, checks that nobody
 //!   but admins can change that file or anything above it, writes
 //!   `HKLM\...\Image File Execution Options\taskmgr.exe\Debugger = "<launcher>"`,
 //!   runs a headless probe, and only then records `Enabled=1`. Any failure puts
 //!   the registry back exactly.
-//! * The launcher is `blink.exe` started under the name `blink-tm.exe`
-//!   (`launcher()`, the first thing `main` does): it messages a Blink that is
-//!   already running; with none running it **cold-starts Blink from its own
-//!   protected image** (`RealLaunch::start_blink`: file locked against swaps, ACL
+//! * The launcher is `hayate.exe` started under the name `hayate-tm.exe`
+//!   (`launcher()`, the first thing `main` does): it messages a Hayate that is
+//!   already running; with none running it **cold-starts Hayate from its own
+//!   protected image** (`RealLaunch::start_hayate`: file locked against swaps, ACL
 //!   chain re-verified, clean command line, environment rebuilt from known folders,
-//!   3 s for the window to appear). On Shift, a hung Blink, an untrusted launcher or
+//!   3 s for the window to appear). On Shift, a hung Hayate, an untrusted launcher or
 //!   any failure it starts the real Task Manager with `DEBUG_PROCESS`, which makes
 //!   `CreateProcess` skip IFEO. It never executes any path but its own, never writes
-//!   anything, never trusts its arguments or environment. The cold-started Blink is a
-//!   `blink-tm.exe` whose parent is the same image (`cold_child_here`) and runs as the app.
+//!   anything, never trusts its arguments or environment. The cold-started Hayate is a
+//!   `hayate-tm.exe` whose parent is the same image (`cold_child_here`) and runs as the app.
 //! * All decisions are in `logic` and tested with an in-memory registry. The
 //!   real registry (`RealRegistry`) is only constructed by the helper, the
 //!   launcher and the Settings status read; under `cfg(test)` it panics.
@@ -43,7 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 // ---- the real registry (HKLM, 64-bit view) -------------------------------------
 
 /// Diagnostic log line. Elevated paths (helper, launcher install) never write to the
-/// user-writable %LOCALAPPDATA% blink.log: that path could be a link or swapped by any
+/// user-writable %LOCALAPPDATA% hayate.log: that path could be a link or swapped by any
 /// process of the user, and an elevated writer would follow it. The helper reports by exit code.
 fn log(line: &str) {
     if log_allowed(osutil::is_elevated()) {
@@ -175,7 +175,7 @@ impl Registry for RealRegistry {
 
 // ---- the real machine ------------------------------------------------------------
 
-/// The installed blink.exe (or its folder) below Program Files must be admin-only and free of links
+/// The installed hayate.exe (or its folder) below Program Files must be admin-only and free of links
 /// (same checks as the launcher). Used after an all-users install copied it.
 pub fn verify_admin_only(path: &str, require_file: bool) -> std::result::Result<(), String> {
     let pf = program_files();
@@ -302,12 +302,12 @@ impl RealHost {
     fn chain(path: &str, require_file: bool) -> std::result::Result<(), String> {
         let pf = program_files();
         if expected_launcher(&pf).is_none_or(|e| norm(&e) != norm(path)) {
-            return Err(format!("{path} is not %ProgramFiles%\\Blink\\{LAUNCHER_NAME}"));
+            return Err(format!("{path} is not %ProgramFiles%\\Hayate\\{LAUNCHER_NAME}"));
         }
         Self::chain_any(path, require_file, &pf)
     }
 
-    /// The same walk for any file below Program Files (the all-users blink.exe).
+    /// The same walk for any file below Program Files (the all-users hayate.exe).
     fn chain_any(path: &str, require_file: bool, pf: &str) -> std::result::Result<(), String> {
         let pf = pf.to_string();
         if require_file && !Path::new(path).is_file() {
@@ -351,7 +351,7 @@ impl Host for RealHost {
     }
 
     fn state_trusted(&self) -> std::result::Result<(), String> {
-        Self::key_admin_only(r"SOFTWARE\Blink")?;
+        Self::key_admin_only(r"SOFTWARE\Hayate")?;
         Self::key_admin_only(STATE_KEY)
     }
 
@@ -379,7 +379,7 @@ impl Host for RealHost {
             // staged copies (unique names) a cut-short run left behind
             for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
                 let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-                if n.starts_with("blink-tm.new") && n.ends_with(".exe") {
+                if n.starts_with("hayate-tm.new") && n.ends_with(".exe") {
                     let _ = std::fs::remove_file(e.path());
                 }
             }
@@ -387,13 +387,13 @@ impl Host for RealHost {
         let _ = std::fs::remove_file(&old);
         let mut how = "removed";
         if std::fs::remove_file(path).is_err() && Path::new(path).exists() {
-            // running (a Task Manager request that cold-started Blink): a running image cannot be
+            // running (a Task Manager request that cold-started Hayate): a running image cannot be
             // deleted but can be renamed inside its own admin-only folder; the renamed file is
             // deleted at the next reboot (best effort) and removed with the folder on uninstall
             how = if std::fs::rename(path, &old).is_ok() {
                 let o = wide(&old);
                 let _ = unsafe { MoveFileExW(pcw(&o), PCWSTR::null(), MOVEFILE_DELAY_UNTIL_REBOOT) };
-                "renamed to blink-tm.old.exe (it is running), deleted at reboot"
+                "renamed to hayate-tm.old.exe (it is running), deleted at reboot"
             } else {
                 "kept (it is running), removed on the next switch-off or uninstall"
             };
@@ -496,7 +496,7 @@ impl Host for RealHost {
     fn swap_launcher(&mut self, path: &str) -> std::result::Result<(), String> {
         let new = STAGED.with(|c| c.borrow_mut().take()).ok_or("no launcher was staged by this run")?;
         swap_files(&mut RealFs, path, &new.to_string_lossy(), &old_path(path))?;
-        log(&format!("taskmgr: launcher at {path} swapped, previous kept as blink-tm.old.exe"));
+        log(&format!("taskmgr: launcher at {path} swapped, previous kept as hayate-tm.old.exe"));
         Ok(())
     }
 
@@ -509,20 +509,20 @@ impl Host for RealHost {
     }
 }
 
-/// `blink-tm.old.exe` beside the launcher
+/// `hayate-tm.old.exe` beside the launcher
 fn old_path(launcher: &str) -> String {
-    launcher.replace(LAUNCHER_NAME, "blink-tm.old.exe")
+    launcher.replace(LAUNCHER_NAME, "hayate-tm.old.exe")
 }
 
-/// `blink-tm.new.<tag><pid>-<time>.exe` beside the launcher: staged copies never share a name
+/// `hayate-tm.new.<tag><pid>-<time>.exe` beside the launcher: staged copies never share a name
 fn unique_name(dir: &Path, tag: &str) -> std::path::PathBuf {
-    dir.join(format!("blink-tm.new.{tag}{}-{:x}.exe", std::process::id(), osutil::now_ms()))
+    dir.join(format!("hayate-tm.new.{tag}{}-{:x}.exe", std::process::id(), osutil::now_ms()))
 }
 
-/// Build ordinal of this exe (seconds since 1970 at build time; `BLINK_BUILD_ORDINAL` overrides it for
+/// Build ordinal of this exe (seconds since 1970 at build time; `HAYATE_BUILD_ORDINAL` overrides it for
 /// tests). A larger number is a newer build: a launcher is only ever refreshed forward.
 pub fn build_ordinal() -> u64 {
-    env!("BLINK_BUILD").parse().unwrap_or(0)
+    env!("HAYATE_BUILD").parse().unwrap_or(0)
 }
 
 /// The real file operations of a launcher swap (`logic::swap_files` / `restore_files`).
@@ -593,15 +593,15 @@ thread_local! {
     static SWAP_LOCK: std::cell::RefCell<Option<ColdLock>> = const { std::cell::RefCell::new(None) };
 }
 
-// ---- the launcher (blink.exe started as blink-tm.exe) -------------------------------
+// ---- the launcher (hayate.exe started as hayate-tm.exe) -------------------------------
 
 fn key_down(vk: VIRTUAL_KEY) -> bool {
     (unsafe { GetAsyncKeyState(vk.0 as i32) } as u16) & 0x8000 != 0
 }
 
-/// First thing in `main`: when this exe was started as `blink-tm.exe` it is the
-/// IFEO launcher, runs to its end and exits. Returns false for a normal Blink, and for
-/// the Blink this launcher cold-started from its own image (`cold_child_here`).
+/// First thing in `main`: when this exe was started as `hayate-tm.exe` it is the
+/// IFEO launcher, runs to its end and exits. Returns false for a normal Hayate, and for
+/// the Hayate this launcher cold-started from its own image (`cold_child_here`).
 pub fn launcher() -> bool {
     let Ok(exe) = std::env::current_exe() else { return false };
     if !exe.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(LAUNCHER_NAME)) {
@@ -609,7 +609,7 @@ pub fn launcher() -> bool {
     }
     let exe = exe.to_string_lossy().into_owned();
     if cold_child_here(&exe) {
-        // elevated, and its data dir is the medium user's: it writes no blink.log
+        // elevated, and its data dir is the medium user's: it writes no hayate.log
         // (`osutil::data_dir` also refuses a data dir behind a link); docs §7.3a "Data dir"
         osutil::mark_cold_started();
         return false;
@@ -638,7 +638,7 @@ fn parent_pid() -> Option<u32> {
     }
 }
 
-/// This process is the Blink the launcher cold-started: elevated, its parent is this same
+/// This process is the Hayate the launcher cold-started: elevated, its parent is this same
 /// image, and the file and every folder above it are still admin-only. Argv and the
 /// environment are not looked at (they are the caller's to write).
 fn cold_child_here(exe: &str) -> bool {
@@ -651,9 +651,9 @@ fn cold_child_here(exe: &str) -> bool {
 
 const COLD_LOCK_MS: u32 = 3000;
 
-/// One cold start at a time (a second Task Manager request while the first Blink is still
+/// One cold start at a time (a second Task Manager request while the first Hayate is still
 /// starting waits, then finds its window). The lock is an exclusive (share mode 0) file inside
-/// the admin-only `%ProgramFiles%\Blink`, created with its own protected DACL (SYSTEM and
+/// the admin-only `%ProgramFiles%\Hayate`, created with its own protected DACL (SYSTEM and
 /// Administrators only, `LOCK_SDDL`): the folder's inherited Users read entry is NOT inherited, so
 /// a medium user cannot open it, even read-only, and so cannot hold it (a named mutex in `Global\`
 /// can be squatted). An existing file with any other allow entry is deleted and recreated, or, if
@@ -661,7 +661,7 @@ const COLD_LOCK_MS: u32 = 3000;
 /// all) is told apart from "held by another start" (wait up to `COLD_LOCK_MS`, then give up).
 struct ColdLock {
     h: HANDLE,
-    /// we hold the exclusive handle; false = another start held it for the whole wait: never start a Blink
+    /// we hold the exclusive handle; false = another start held it for the whole wait: never start a Hayate
     held: bool,
 }
 
@@ -726,7 +726,7 @@ impl OpLock {
         let mut psd = PSECURITY_DESCRIPTOR::default();
         unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(pcw(&sddl), SDDL_REVISION_1, &mut psd, None) }.map_err(|e| e.message())?;
         let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: psd.0, bInheritHandle: windows::core::BOOL(0) };
-        let h = unsafe { CreateMutexW(Some(&sa), false, w!("Global\\BlinkTaskMgrHelper")) };
+        let h = unsafe { CreateMutexW(Some(&sa), false, w!("Global\\HayateTaskMgrHelper")) };
         unsafe { LocalFree(Some(HLOCAL(psd.0))) };
         let h = h.map_err(|e| format!("the Task Manager step lock cannot be opened ({})", e.message()))?;
         let w = unsafe { WaitForSingleObject(h, 30_000) };
@@ -752,7 +752,7 @@ impl Drop for OpLock {
 
 fn lock_path() -> Result<String, String> {
     let pf = crate::setup::program_files().ok_or("cannot read the Program Files folder")?;
-    Ok(format!("{pf}\\Blink\\.coldstart.lock"))
+    Ok(format!("{pf}\\Hayate\\.coldstart.lock"))
 }
 
 impl Drop for ColdLock {
@@ -785,7 +785,7 @@ fn run_launcher(exe: &str) -> i32 {
     }
     let reg = RealRegistry::new();
     let state = read_state(&reg, &target);
-    let c = LaunchCtx { args, shift: key_down(VK_SHIFT), ctrl: key_down(VK_CONTROL), guard_set: std::env::var_os(GUARD_ENV).is_some() };
+    let c = LaunchCtx { args, shift: key_down(VK_SHIFT), ctrl: key_down(VK_CONTROL), guard_set: crate::osutil::env_var_os(GUARD_ENV).is_some() };
     // the launcher is meant to run elevated (substitute of an auto-elevated image): an unelevated
     // one trusts nothing and only hands over to the native Task Manager
     let trusted = if osutil::is_elevated() { RealHost.launcher_trusted(exe) } else { Err("the launcher is not running elevated".to_string()) };
@@ -809,14 +809,14 @@ fn run_launcher(exe: &str) -> i32 {
             }
         }
         plan => {
-            // only a Blink recorded at enable time, or this launcher's own protected image, is ever
+            // only a Hayate recorded at enable time, or this launcher's own protected image, is ever
             // messaged; only this launcher's own image is ever started, and only while it is itself
-            // where and how it must be (`RealLaunch::start_blink` checks that again)
+            // where and how it must be (`RealLaunch::start_hayate` checks that again)
             // no lock on the secure desktop either: `launch` goes straight to native there
             // (an unreadable desktop name counts as "not interactive")
             let interactive = desktop_name().is_some_and(|n| interactive_desktop(&n));
             let lock = if plan == Plan::Show && trusted.is_ok() && interactive { ColdLock::acquire() } else { None };
-            let mut h = RealLaunch { exe: exe.to_string(), recorded: state.as_ref().map(|s| s.blink_path.clone()).unwrap_or_default(), trusted, native, child: None, interactive, locked: lock.as_ref().is_some_and(|l| l.held) };
+            let mut h = RealLaunch { exe: exe.to_string(), recorded: state.as_ref().map(|s| s.hayate_path.clone()).unwrap_or_default(), trusted, native, child: None, interactive, locked: lock.as_ref().is_some_and(|l| l.held) };
             let d = launch(&plan, &mut h);
             if !d.ok {
                 // nobody is watching this process: say it, Task Manager did not open
@@ -832,7 +832,7 @@ fn error_box(text: &str) {
     unsafe { MessageBoxW(None, pcw(&t), pcw(&c), MB_OK | MB_ICONERROR) };
 }
 
-/// Staging targets and `--target-path`: debug builds (test machine runs) only.
+/// Staging targets and `--target-path`: debug builds (rig tests) only.
 fn staging_allowed() -> bool {
     cfg!(debug_assertions)
 }
@@ -843,27 +843,27 @@ struct RealLaunch {
     recorded: String,
     trusted: Result<(), String>,
     native: Option<String>,
-    /// the Blink this launcher started (process handle)
+    /// the Hayate this launcher started (process handle)
     child: Option<HANDLE>,
     interactive: bool,
     locked: bool,
 }
 
 impl RealLaunch {
-    /// A Blink window of the recorded image or the launcher's own image answers within
+    /// A Hayate window of the recorded image or the launcher's own image answers within
     /// `timeout_ms`: show it in front.
     fn look(&self, timeout_ms: u32) -> Seen {
         let msg = crate::win::show_msg();
         let mut prev: Option<HWND> = None;
         loop {
-            let Ok(h) = (unsafe { FindWindowExW(None, prev, w!("BlinkMain"), None) }) else { return Seen::Absent };
+            let Ok(h) = (unsafe { FindWindowExW(None, prev, w!("HayateMain"), None) }) else { return Seen::Absent };
             if h.is_invalid() {
                 return Seen::Absent;
             }
             prev = Some(h);
             let mut pid = 0u32;
             unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
-            if !osutil::image_path(pid).is_some_and(|p| blink_window_ok(&p, &self.recorded, &self.exe)) {
+            if !osutil::image_path(pid).is_some_and(|p| hayate_window_ok(&p, &self.recorded, &self.exe)) {
                 continue;
             }
             let mut res = 0usize;
@@ -876,7 +876,7 @@ impl RealLaunch {
         }
     }
 
-    /// Variables of a cold-started Blink that come from the system (known folders), never
+    /// Variables of a cold-started Hayate that come from the system (known folders), never
     /// from the environment the caller handed the elevated launcher.
     fn system_env() -> std::result::Result<Vec<(String, String)>, String> {
         let (local, roaming, profile) = crate::setup::user_folders().ok_or("cannot read the user's profile folders")?;
@@ -908,7 +908,7 @@ impl LaunchHost for RealLaunch {
         self.look(2000)
     }
 
-    fn start_blink(&mut self) -> std::result::Result<(), String> {
+    fn start_hayate(&mut self) -> std::result::Result<(), String> {
         use std::os::windows::fs::OpenOptionsExt;
         // hold the launcher file open with no write/delete/rename sharing while it is re-verified
         // and started: nobody can swap it between the check and CreateProcess
@@ -946,7 +946,7 @@ impl LaunchHost for RealLaunch {
             if self.look(400) == Seen::Shown {
                 break true;
             }
-            // the started Blink already ended (it found another instance, or crashed): no point waiting
+            // the started Hayate already ended (it found another instance, or crashed): no point waiting
             if self.child.is_some_and(|h| unsafe { WaitForSingleObject(h, 0) } == WAIT_OBJECT_0) {
                 break false;
             }
@@ -989,7 +989,7 @@ fn start_native(image: &str, test_only: bool) -> bool {
     let mut pi = PROCESS_INFORMATION::default();
     let flags = PROCESS_CREATION_FLAGS(NATIVE_FLAGS | if test_only { CREATE_SUSPENDED.0 } else { 0 });
     unsafe {
-        std::env::set_var(GUARD_ENV, "1");
+        std::env::set_var(format!("HAYATE_{GUARD_ENV}"), "1");
         if CreateProcessW(pcw(&app), Some(PWSTR(cmd.as_mut_ptr())), None, None, false, flags, None, None, &si, &mut pi).is_err() {
             return false;
         }
@@ -1016,12 +1016,14 @@ fn start_native(image: &str, test_only: bool) -> bool {
     }
 }
 
-// ---- the elevated helper (blink.exe --taskmgr-enable / --taskmgr-disable / --taskmgr-refresh) ----
+// ---- the elevated helper (hayate.exe --taskmgr-enable / --taskmgr-disable / --taskmgr-refresh) ----
 
 #[derive(Clone, Copy, PartialEq)]
 enum Op {
     Enable,
     Disable,
+    /// turn off a redirect installed by the pre-rename build (its launcher is in Program Files\Blink)
+    DisableLegacy,
     /// replace the launcher file with this exe (docs §7.5 "Launcher update"); takes no path argument
     Refresh,
 }
@@ -1032,6 +1034,7 @@ pub fn cli() -> bool {
     let Some(op) = a.first().map(|s| s.as_str()).and_then(|s| match s {
         "--taskmgr-enable" => Some(Op::Enable),
         "--taskmgr-disable" => Some(Op::Disable),
+        "--taskmgr-disable-legacy" => Some(Op::DisableLegacy),
         "--taskmgr-refresh" => Some(Op::Refresh),
         _ => None,
     }) else {
@@ -1045,7 +1048,7 @@ pub fn cli() -> bool {
     std::process::exit(code);
 }
 
-/// A leftover staged copy (`blink-tm.new*.exe`) older than this is a cut-short run's: swept at the start of a step.
+/// A leftover staged copy (`hayate-tm.new*.exe`) older than this is a cut-short run's: swept at the start of a step.
 const STAGED_MAX_AGE: Duration = Duration::from_secs(600);
 
 fn sweep_staged(pf: &str) {
@@ -1053,13 +1056,13 @@ fn sweep_staged(pf: &str) {
     let Some(dir) = Path::new(&l).parent().map(Path::to_path_buf) else { return };
     for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-        if n.starts_with("blink-tm.new") && n.ends_with(".exe") && e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > STAGED_MAX_AGE) {
+        if n.starts_with("hayate-tm.new") && n.ends_with(".exe") && e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > STAGED_MAX_AGE) {
             let _ = std::fs::remove_file(e.path());
         }
     }
 }
 
-/// The last failed step's text, target independent: `HKLM\SOFTWARE\Blink\TaskManager` value `LastError`.
+/// The last failed step's text, target independent: `HKLM\SOFTWARE\Hayate\TaskManager` value `LastError`.
 fn clear_last_error(reg: &mut dyn Registry) {
     let _ = reg.delete_value(STATE_KEY, "LastError");
     if reg.is_empty(STATE_KEY) {
@@ -1078,13 +1081,13 @@ fn run_helper_op(op: Op, target: Option<&str>, image: Option<&str>) -> i32 {
         Err(e) => {
             log(&format!("taskmgr: {e}"));
             // no lock, so no state is touched; the text alone is written (cleared by the next step), so the
-            // asking Blink never shows the text of an older failure for this one
+            // asking Hayate never shows the text of an older failure for this one
             let _ = reg.set(STATE_KEY, "LastError", &clean_text(&e));
             return EXIT_BUSY;
         }
     };
-    // the elevated helper writes no blink.log: its failure text goes into the admin-only state key
-    // (read by the Blink that asked), cleared at the start of every run, whatever the run decides
+    // the elevated helper writes no hayate.log: its failure text goes into the admin-only state key
+    // (read by the Hayate that asked), cleared at the start of every run, whatever the run decides
     clear_last_error(&mut reg);
     // disable without --target turns everything of ours off (staging state too, in debug builds)
     let all = op == Op::Disable && target.is_none();
@@ -1097,8 +1100,8 @@ fn run_helper_op(op: Op, target: Option<&str>, image: Option<&str>) -> i32 {
         return EXIT_REFUSED;
     }
     let st = crate::setup::status();
-    // the real Task Manager only from an installed Blink (a portable copy may drive a staging target)
-    if op != Op::Disable && is_real(&target) && st.at == crate::setup::logic::Where::Portable {
+    // the real Task Manager only from an installed Hayate (a portable copy may drive a staging target)
+    if !matches!(op, Op::Disable | Op::DisableLegacy) && is_real(&target) && st.at == crate::setup::logic::Where::Portable {
         return EXIT_REFUSED;
     }
     let pf = program_files();
@@ -1108,6 +1111,7 @@ fn run_helper_op(op: Op, target: Option<&str>, image: Option<&str>) -> i32 {
         Op::Enable => enable(&mut reg, &mut host, &target, &pf, &st.exe, image).map(|o| format!("{o:?}")),
         Op::Disable if all => disable_all(&mut reg, &mut host, &pf, staging_allowed()).map(|o| format!("{o:?}")),
         Op::Disable => disable(&mut reg, &mut host, &target, &pf).map(|o| format!("{o:?}")),
+        Op::DisableLegacy => disable_legacy(&mut reg, &mut host, &target, &pf).map(|o| format!("{o:?}")),
         Op::Refresh => refresh(&mut reg, &mut host, &target, &pf, &st.exe).map(|o| format!("{o:?}")),
     };
     match r {
@@ -1165,7 +1169,7 @@ struct FreshView {
 
 static FRESH: Mutex<Option<(Instant, FreshView)>> = Mutex::new(None);
 static FRESH_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// sha256 of this process's own exe, hashed once (the file is not changed while Blink runs)
+/// sha256 of this process's own exe, hashed once (the file is not changed while Hayate runs)
 static RUNNING_SHA: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 /// (size, last write) of a file at its last hash, and that hash: a hash is redone only when the file changed
 type HashKey = (u64, Option<std::time::SystemTime>);
@@ -1198,14 +1202,14 @@ fn sha_cached(path: &str) -> Option<String> {
     h
 }
 
-/// Launcher vs this Blink (reads files and hashes them: never on the UI thread). The cold-started
-/// launcher image compares itself with the installed Blink instead (it has no build ordinal of that one).
+/// Launcher vs this Hayate (reads files and hashes them: never on the UI thread). The cold-started
+/// launcher image compares itself with the installed Hayate instead (it has no build ordinal of that one).
 fn compute_fresh() -> FreshView {
     let reg = RealRegistry::new();
     let st = read_state(&reg, REAL_TARGET);
     let launcher = expected_launcher(&program_files()).and_then(|l| sha_cached(&l));
     let (running, running_build) = if is_launcher_image() {
-        (st.as_ref().map(|s| s.blink_path.clone()).filter(|p| !p.trim().is_empty()).and_then(|p| sha_cached(&p)), None)
+        (st.as_ref().map(|s| s.hayate_path.clone()).filter(|p| !p.trim().is_empty()).and_then(|p| sha_cached(&p)), None)
     } else {
         (running_sha(), Some(build_ordinal()))
     };
@@ -1234,7 +1238,7 @@ fn fresh_view() -> FreshView {
     known.map(|(_, v)| v).unwrap_or(FreshView { fresh: Fresh::Unknown, launcher_sha: None, running_sha: None })
 }
 
-/// This process is the launcher image: the Blink the launcher cold-started. It never refreshes itself.
+/// This process is the launcher image: the Hayate the launcher cold-started. It never refreshes itself.
 pub fn is_launcher_image() -> bool {
     osutil::cold_started() || std::env::current_exe().is_ok_and(|e| e.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(LAUNCHER_NAME)))
 }
@@ -1243,13 +1247,13 @@ pub fn is_launcher_image() -> bool {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Offer {
     None,
-    /// this Blink is newer than the launcher: line + [Refresh launcher]
+    /// this Hayate is newer than the launcher: line + [Refresh launcher]
     Refresh,
     /// the launcher file is gone, the previous copy is there: line + [Repair launcher]
     Repair,
-    /// the cold-started launcher image sees a different installed Blink: a hint only, no button
+    /// the cold-started launcher image sees a different installed Hayate: a hint only, no button
     Hint,
-    /// the launcher is a newer build than this Blink: nothing to do (a note, no button)
+    /// the launcher is a newer build than this Hayate: nothing to do (a note, no button)
     Newer,
 }
 
@@ -1296,7 +1300,7 @@ pub fn note_updated() {
     FORCED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The switch is usable from an installed Blink only.
+/// The switch is usable from an installed Hayate only.
 pub fn allowed() -> bool {
     crate::setup::status().at != crate::setup::logic::Where::Portable
 }
@@ -1348,8 +1352,8 @@ fn helper(arg: &str) -> std::result::Result<(), String> {
 
 /// Settings switch: UAC, then the helper does everything. Blocks until the helper is done.
 pub fn set_enabled(on: bool) -> std::result::Result<(), String> {
-    // this is the user's own Blink (not the elevated helper): its log is the normal one
-    osutil::log(&format!("taskmgr: Settings asked to turn the redirect {} (this Blink elevated={})", if on { "on" } else { "off" }, osutil::is_elevated()));
+    // this is the user's own Hayate (not the elevated helper): its log is the normal one
+    osutil::log(&format!("taskmgr: Settings asked to turn the redirect {} (this Hayate elevated={})", if on { "on" } else { "off" }, osutil::is_elevated()));
     let t = Instant::now();
     let r = helper(if on { "--taskmgr-enable" } else { "--taskmgr-disable" });
     osutil::log(&format!("taskmgr: helper finished in {} ms: {}", t.elapsed().as_millis(), match &r { Ok(()) => "ok".to_string(), Err(e) => e.clone() }));
@@ -1379,7 +1383,7 @@ pub fn start_toggle(on: bool, done: impl FnOnce() + Send + 'static) {
     });
 }
 
-/// Settings "Refresh launcher": one UAC prompt (none when this Blink is already elevated), then the
+/// Settings "Refresh launcher": one UAC prompt (none when this Hayate is already elevated), then the
 /// elevated helper replaces the launcher file with its own image and checks it. Never from the
 /// launcher image itself.
 pub fn start_refresh(done: impl FnOnce() + Send + 'static) {
@@ -1387,7 +1391,7 @@ pub fn start_refresh(done: impl FnOnce() + Send + 'static) {
         return;
     }
     std::thread::spawn(move || {
-        osutil::log(&format!("taskmgr: Settings asked to refresh the launcher (this Blink elevated={})", osutil::is_elevated()));
+        osutil::log(&format!("taskmgr: Settings asked to refresh the launcher (this Hayate elevated={})", osutil::is_elevated()));
         let r = run_refresh_helper();
         *RESULT.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
         GATE.leave();
@@ -1402,11 +1406,11 @@ fn run_refresh_helper() -> std::result::Result<(), String> {
     r
 }
 
-/// From the main window once it exists, in an ELEVATED installed Blink: when the redirect is on and the
-/// launcher is older than this Blink (or its file is missing), refresh it without a prompt (the helper
+/// From the main window once it exists, in an ELEVATED installed Hayate: when the redirect is on and the
+/// launcher is older than this Hayate (or its file is missing), refresh it without a prompt (the helper
 /// starts elevated from an elevated process). Only when this exe passes `verify_admin_only` (the same
 /// rule as the uninstall gate: a user-writable exe never gets a silent elevated copy). One attempt per
-/// (launcher, this Blink) pair, remembered in the admin-only state key (not in the user's data dir), so
+/// (launcher, this Hayate) pair, remembered in the admin-only state key (not in the user's data dir), so
 /// a failing refresh never loops; an elevated self-update forces one more. The Settings button stays
 /// for everything else. Always on a worker thread, always logged.
 pub fn auto_refresh(done: impl FnOnce() + Send + 'static) {
@@ -1418,7 +1422,7 @@ pub fn auto_refresh(done: impl FnOnce() + Send + 'static) {
         let pf = program_files();
         let exe = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
         if let Err(e) = verify_admin_only(&exe, true) {
-            osutil::log(&format!("taskmgr: no automatic launcher refresh: this Blink is not an admin-only install ({e}); the Settings button asks first"));
+            osutil::log(&format!("taskmgr: no automatic launcher refresh: this Hayate is not an admin-only install ({e}); the Settings button asks first"));
             GATE.leave();
             return;
         }
@@ -1443,7 +1447,7 @@ pub fn auto_refresh(done: impl FnOnce() + Send + 'static) {
             GATE.leave();
             return;
         }
-        osutil::log(&format!("taskmgr: elevated start, {} ({pair}{}): {}", if repair { "launcher file missing" } else { "launcher older than this Blink" }, if forced { ", after an elevated update" } else { "" }, if repair { "repairing it" } else { "refreshing it" }));
+        osutil::log(&format!("taskmgr: elevated start, {} ({pair}{}): {}", if repair { "launcher file missing" } else { "launcher older than this Hayate" }, if forced { ", after an elevated update" } else { "" }, if repair { "repairing it" } else { "refreshing it" }));
         // remembered BEFORE the attempt: a crash or a failure is not retried at every start
         // under the same machine-wide exclusion as the helper steps, and only while the redirect is still
         // on: a disable that ran meanwhile must never find its state key written to (never recreated)
@@ -1472,12 +1476,32 @@ pub fn take_result() -> Option<std::result::Result<(), String>> {
     RESULT.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
-/// Before Blink uninstalls itself: a redirect that is on (or half there) is
+/// Before Hayate uninstalls itself: a redirect that is on (or half there) is
 /// turned off first, with UAC. Cancelled or failed: the uninstall stops.
 pub fn uninstall_gate() -> std::result::Result<(), String> {
     forget();
+    let reg = RealRegistry::new();
+    let user_exe = crate::setup::status().at == crate::setup::logic::Where::User;
+    // a redirect installed by the pre-rename build counts as ours (exact quoted
+    // launcher in Program Files\Blink only; any other form aborts). It is turned
+    // off with the same elevated helper the Settings switch uses, so a per-user
+    // install can uninstall too (UAC shows the exe, as in Settings).
+    let legacy = legacy_uninstall_step(&reg, &program_files());
+    match legacy {
+        UninstallStep::Nothing => {}
+        UninstallStep::Refuse(m) => return Err(m),
+        UninstallStep::TurnOff => {
+            if !GATE.enter() {
+                return Err("A Task Manager step is still running. Wait a moment and try again. Nothing was removed.".into());
+            }
+            let r = helper("--taskmgr-disable-legacy");
+            GATE.leave();
+            r.map_err(|e| format!("Hayate still redirects Task Manager through its pre-rename launcher and could not turn that off ({e}). Nothing was removed."))?;
+            forget();
+        }
+    }
     let step = uninstall_needed(&RealRegistry::new(), &RealHost, &program_files(), staging_allowed());
-    match gate_plan(step, crate::setup::status().at == crate::setup::logic::Where::User) {
+    match gate_plan(step, user_exe) {
         GatePlan::Proceed => return Ok(()),
         GatePlan::Refuse(m) => return Err(m),
         GatePlan::TurnOff => {}
@@ -1501,6 +1525,6 @@ pub fn describe(s: &Status) -> String {
         Status::Stale(why) => format!("Broken: Task Manager may not open ({why}). Turn the switch off to repair."),
         Status::Reset => "Off: Windows reset it. Turn it on again if you want it.".into(),
         Status::Foreign(_) => "Another program already redirects Task Manager. Hayate leaves it alone.".into(),
-        Status::PendingRemoval => "Off. blink-tm.exe is still present in Program Files (it was running, or is left over). Switch Hayate Task Manager on and off again, run install.ps1 -Uninstall, or delete it as administrator.".into(),
+        Status::PendingRemoval => "Off. hayate-tm.exe is still present in Program Files (it was running, or is left over). Switch Hayate Task Manager on and off again, run install.ps1 -Uninstall, or delete it as administrator.".into(),
     }
 }

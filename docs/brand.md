@@ -4,4 +4,4 @@
 - **Colors:** accent `#56c8d8` (the app's `ACC`), tile `#151a21` (`PAN`) with `#29303b` ring (`LN`), page `#0f1217` (`BG`), wordmark `#e8ebf0` (`TX1`), meta `#8a93a1` (`TX3`). One accent only; mono version is `currentColor`.
 - **Clear space:** keep a margin of one stem width (about 1/8 of the mark's height) on all sides; never place other graphics inside it.
 - **Min size:** 16 px (use the small cut below 48 px); the wordmark's 疾風 line needs at least 24 px of cap height, otherwise drop it and use "Hayate" alone.
-- **Rebuild:** `python assets/brand/build.py` (needs `fonttools` and ImageMagick); text is outlined (Barlow Semi Condensed, Noto Sans JP; both SIL OFL 1.1, bundled in `assets/brand/fonts/`) so SVGs need no font at runtime and the build needs no system fonts. `res/blink.ico` is built from `assets/brand/png/` (16-256).
+- **Rebuild:** `python assets/brand/build.py` (needs `fonttools` and ImageMagick); text is outlined (Barlow Semi Condensed, Noto Sans JP; both SIL OFL 1.1, bundled in `assets/brand/fonts/`) so SVGs need no font at runtime and the build needs no system fonts. `res/hayate.ico` is built from `assets/brand/png/` (16-256).

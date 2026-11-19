@@ -2,9 +2,9 @@
 //! (AppControl replacement). All push-driven, ~0 CPU idle.
 //!
 //! Threads:
-//! - `blink-watch` worker (THREAD_MODE_BACKGROUND): owns service cache, seen
+//! - `hayate-watch` worker (THREAD_MODE_BACKGROUND): owns service cache, seen
 //!   table, signature cache; turns raw messages into events + toasts.
-//! - `blink-watch-notify`: alertable wait for SCM created/deleted APCs and
+//! - `hayate-watch-notify`: alertable wait for SCM created/deleted APCs and
 //!   the 6 ConsentStore registry notifications.
 //! - EvtSubscribe callback (system thread pool) and the ETW thread only post
 //!   messages to the worker.
@@ -834,10 +834,10 @@ pub fn start() -> Arc<Watch> {
         last_record: 0,
         sysroot: std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()),
     };
-    let _ = std::thread::Builder::new().name("blink-watch".into()).stack_size(512 * 1024).spawn(move || worker.run(rx));
+    let _ = std::thread::Builder::new().name("hayate-watch".into()).stack_size(512 * 1024).spawn(move || worker.run(rx));
 
     let (w2, tx2) = (w.clone(), tx.clone());
-    let _ = std::thread::Builder::new().name("blink-watch-notify".into()).stack_size(128 * 1024).spawn(move || notify_thread(w2, tx2));
+    let _ = std::thread::Builder::new().name("hayate-watch-notify".into()).stack_size(128 * 1024).spawn(move || notify_thread(w2, tx2));
 
     let ptx = Mutex::new(tx);
     etw::subscribe(move |ev| {
@@ -887,7 +887,7 @@ mod tests {
     /// ignored, missing and already-seen paths.
     #[test]
     fn seed_without_signatures() {
-        let d = std::env::temp_dir().join(format!("blink-seed-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("hayate-seed-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&d);
         let f = d.join("seen.tsv");
         let _ = std::fs::remove_file(&f);
@@ -943,7 +943,7 @@ mod bench {
         }
         let t_sig = cpu_ms() - t;
         println!("{} paths ({} stat ok): enum {:.0} ms, stat {:.0} ms, version {:.0} ms, sig {:.0} ms {:?}", paths.len(), st.iter().flatten().count(), t_enum, t_stat, t_ver, t_sig, n);
-        let f = std::env::temp_dir().join(format!("blink-bench-seen-{}.tsv", std::process::id()));
+        let f = std::env::temp_dir().join(format!("hayate-bench-seen-{}.tsv", std::process::id()));
         let _ = std::fs::remove_file(&f);
         let mut a = apps::Apps::open(f.clone());
         let t = cpu_ms();

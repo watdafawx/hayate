@@ -23,11 +23,11 @@ use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
-const CLASS: PCWSTR = w!("BlinkMain");
-const CLASS_MULTI: PCWSTR = w!("BlinkMainMulti");
+const CLASS: PCWSTR = w!("HayateMain");
+const CLASS_MULTI: PCWSTR = w!("HayateMainMulti");
 
-/// Window class; a BLINK_MULTI test instance gets its own so it never finds
-/// (or is found by) the user's running Blink.
+/// Window class; a HAYATE_MULTI test instance gets its own so it never finds
+/// (or is found by) the user's running Hayate.
 fn class() -> PCWSTR {
     if crate::osutil::multi() { CLASS_MULTI } else { CLASS }
 }
@@ -100,17 +100,17 @@ unsafe fn dispatch(msg: &MSG) {
     }
 }
 
-/// Posted by an ELEVATED copy that replaces this unelevated Blink after UAC was
+/// Posted by an ELEVATED copy that replaces this unelevated Hayate after UAC was
 /// accepted. Not let through the integrity filter (unlike `show_msg`): only a
 /// process of this integrity or higher can post it, which could end this process
 /// anyway.
 pub fn quit_msg() -> u32 {
     static Q: OnceLock<u32> = OnceLock::new();
-    *Q.get_or_init(|| unsafe { RegisterWindowMessageW(w!("BlinkQuitForAdminRestart")) })
+    *Q.get_or_init(|| unsafe { RegisterWindowMessageW(w!("HayateQuitForAdminRestart")) })
 }
 
 pub fn show_msg() -> u32 {
-    *SHOW_MSG.get_or_init(|| unsafe { RegisterWindowMessageW(w!("BlinkShowWindow")) })
+    *SHOW_MSG.get_or_init(|| unsafe { RegisterWindowMessageW(w!("HayateShowWindow")) })
 }
 
 pub fn run() {
@@ -125,7 +125,7 @@ pub fn run() {
         // elevated relaunch: wait for the instance that started us to exit
         if let Some(i) = args.iter().position(|a| a == "--wait-pid") {
             if let Some(pid) = args.get(i + 1).and_then(|v| v.parse::<u32>().ok()) {
-                // an elevated copy that replaces an unelevated Blink (Jump List "Restart as administrator", UAC accepted) asks it to quit
+                // an elevated copy that replaces an unelevated Hayate (Jump List "Restart as administrator", UAC accepted) asks it to quit
                 if args.iter().any(|a| a == "--replace-for-admin") {
                     crate::taskbar::quit_replaced(pid);
                 }
@@ -135,16 +135,16 @@ pub fn run() {
                 }
             }
         }
-        // notification-centre click (-ToastActivated) with Blink running: open Watch there
+        // notification-centre click (-ToastActivated) with Hayate running: open Watch there
         if crate::setup::forward(show_msg()) {
             return;
         }
-        // taskbar launch (Jump List task, Nilesoft item): the running Blink gets it
+        // taskbar launch (Jump List task, Nilesoft item): the running Hayate gets it
         let intent = crate::taskbar::intent();
         if let Some(i) = intent {
             use crate::taskbar::logic::Intent;
             if i == Intent::RestartAdmin && !crate::osutil::is_elevated() {
-                // asked here, by this process, never by a message to the running Blink
+                // asked here, by this process, never by a message to the running Hayate
                 // (anything could post one): UAC, and a No changes nothing
                 crate::taskbar::restart_admin();
                 return;
@@ -259,7 +259,7 @@ pub fn run() {
 
         // self-update: timer, and window state / tab of the instance we replaced
         crate::update::start(hwnd);
-        // an ELEVATED installed Blink keeps the protected Task Manager launcher current (no extra prompt)
+        // an ELEVATED installed Hayate keeps the protected Task Manager launcher current (no extra prompt)
         {
             let hw = hwnd.0 as isize;
             crate::taskmgr::set_repaint(move || {
@@ -311,7 +311,7 @@ pub fn run() {
 /// other threads and the thread pool are gone: D3D's device teardown then
 /// schedules work on the dead pool and ntdll raises STATUS_INVALID_PARAMETER
 /// (c000000d, TppRaiseInvalidParameter) — the crash on closing a non-resident
-/// Blink.
+/// Hayate.
 fn drop_state() {
     let t = std::time::Instant::now();
     let taken = STATE.with(|s| s.try_borrow_mut().ok().and_then(|mut s| s.take()));
@@ -478,7 +478,7 @@ fn tray_toggle(hwnd: HWND) {
 /// in this program did, so the log says so and a quit like that is never called "clean").
 static EXIT_WHY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-/// Close the window for a stated reason, which goes into blink.log (`exit: ...`). `user`: the
+/// Close the window for a stated reason, which goes into hayate.log (`exit: ...`). `user`: the
 /// user closed it on purpose (X, Esc, tray Quit); an update trial then knows this is not a crash.
 fn destroy(hwnd: HWND, why: &str, user: bool) {
     crate::osutil::log(&format!("exit: closing the window: {why}{}", if user { " (user)" } else { "" }));
@@ -533,7 +533,7 @@ fn dark_menus() {
     }
 }
 
-/// Blink's icon (resource 1, multi-size) at the `metric` size for `dpi`.
+/// Hayate's icon (resource 1, multi-size) at the `metric` size for `dpi`.
 fn app_icon(hinst: HINSTANCE, metric: SYSTEM_METRICS_INDEX, dpi: u32) -> HICON {
     unsafe {
         let sz = GetSystemMetricsForDpi(metric, dpi);
@@ -901,7 +901,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             DefWindowProcW(hwnd, msg, wp, lp)
         }
         WM_CLOSE => {
-            // the X of Blink's own caption is `Action::Hide`; this is a WM_CLOSE sent by
+            // the X of Hayate's own caption is `Action::Hide`; this is a WM_CLOSE sent by
             // Windows (ghost window, Alt+F4, taskbar Close window) or by another program
             hide(hwnd, "WM_CLOSE (Alt+F4, taskbar, or another program)");
             LRESULT(0)
@@ -938,7 +938,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_DESTROY => {
             if EXIT_WHY.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
-                crate::osutil::log("exit: the window was destroyed and nothing in Blink asked for it (an outside DestroyWindow, or a quit path that logs no reason)");
+                crate::osutil::log("exit: the window was destroyed and nothing in Hayate asked for it (an outside DestroyWindow, or a quit path that logs no reason)");
             }
             // quit paths that skip `destroy` (tray menu, update, Alt+F4 on a hidden-then-shown window)
             if IsWindowVisible(hwnd).as_bool() {
@@ -1027,7 +1027,7 @@ fn act(hwnd: HWND, a: Option<Action>) {
                 }
             }
             Action::InstallAll(c) => {
-                // UAC, then the elevated copy installs and starts the installed Blink; this window just closes
+                // UAC, then the elevated copy installs and starts the installed Hayate; this window just closes
                 with(|a, _| a.setup.error = Some("Waiting for the administrator step (UAC, then the copy): a few seconds...".into()));
                 let hw = hwnd.0 as isize;
                 crate::setup::start_install_all(c, move || {
@@ -1138,7 +1138,7 @@ fn restart_as_admin(hwnd: HWND) {
         if let Ok(exe) = std::env::current_exe() {
             let exe_w: Vec<u16> = exe.to_string_lossy().encode_utf16().chain(Some(0)).collect();
             // UAC starts it through the shell, which drops our environment: carry
-            // BLINK_DATA_DIR / BLINK_MULTI and the current tab as the private args
+            // HAYATE_DATA_DIR / HAYATE_MULTI and the current tab as the private args
             let mut restore = crate::setup::env_restore();
             restore.tab = with(|a, _| a.tab.restore_id());
             let line = crate::update::logic::join_args(&crate::update::logic::admin_relaunch_args(&restore, std::process::id()));
@@ -1155,7 +1155,7 @@ fn restart_as_admin(hwnd: HWND) {
     }
 }
 
-/// A taskbar launch reached this Blink (Jump List task, Nilesoft item):
+/// A taskbar launch reached this Hayate (Jump List task, Nilesoft item):
 /// bring the window up on the asked tab, or start the admin restart.
 fn apply_intent(hwnd: HWND, i: crate::taskbar::logic::Intent) {
     use crate::taskbar::logic::Intent;
@@ -1319,7 +1319,7 @@ fn menu_env(t: &Target) -> Env {
         plans: crate::power::plans(),
         cpu: topo.supported().map_err(|_| topo.groups),
         elevated: crate::osutil::is_elevated(),
-        // cheap static layer only (name list, Windows folder, Blink itself); the panel re-checks live, with the OS critical-process query
+        // cheap static layer only (name list, Windows folder, Hayate itself); the panel re-checks live, with the OS critical-process query
         disallow: match t.rep.as_ref() {
             Some(r) => crate::rules::protect::static_check(crate::rules::protect::Ctx::system(), r.pid, r.path.as_deref())
                 .map_err(|why| why.text().trim_start_matches("refused: ").to_string()),
@@ -1845,7 +1845,7 @@ fn tray_delete(hwnd: HWND) {
     }
 }
 
-/// Open Blink on Watch with `id` selected (0: just Watch): a toast or
+/// Open Hayate on Watch with `id` selected (0: just Watch): a toast or
 /// balloon click.
 fn open_watch(hwnd: HWND, id: u64) {
     with(|a, _| {
@@ -1862,7 +1862,7 @@ fn open_watch(hwnd: HWND, id: u64) {
     show(hwnd);
 }
 
-/// A Watch alert: a Windows toast when Blink has its Start-menu shortcut,
+/// A Watch alert: a Windows toast when Hayate has its Start-menu shortcut,
 /// else a tray balloon. Runs on the tray thread.
 fn balloon(hwnd: HWND, t: &crate::watch::Toast) {
     if crate::notify::toast(crate::notify::Note { title: t.title.clone(), text: t.text.clone(), kind: t.alert.key(), event_id: t.event_id }) {
@@ -1872,7 +1872,7 @@ fn balloon(hwnd: HWND, t: &crate::watch::Toast) {
     notify_balloon(hwnd, &t.title, &t.text, true);
 }
 
-/// Tray balloon (Windows shows it as a toast) with Blink's own large icon,
+/// Tray balloon (Windows shows it as a toast) with Hayate's own large icon,
 /// not the live CPU graph of the tray icon nor the generic info "i".
 fn notify_balloon(hwnd: HWND, title: &str, text: &str, respect_quiet: bool) {
     static ICON: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);

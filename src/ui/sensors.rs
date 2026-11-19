@@ -1,4 +1,4 @@
-//! Sensors, folded into the Vitals detail views (the design mock):
+//! Sensors, folded into the Vitals detail views (docs/mock-vitals-sensors.html):
 //! a panel directly under the CPU / GPU / disk header with a temperature (or
 //! fan / power) graph, WARM / HOT thresholds and one dense row per channel, and
 //! a docked foot (PawnIO notice, "Not detected" strip) under the scrolling
@@ -428,7 +428,7 @@ fn channels(v: &SensorsView, s: &Snapshot, dev: SDev) -> Vec<Sensor> {
     out
 }
 
-/// Channels Blink cannot read for this device ("Not detected" strip).
+/// Channels Hayate cannot read for this device ("Not detected" strip).
 fn missing(s: &Snapshot, dev: SDev) -> Vec<(String, String)> {
     match dev {
         SDev::Cpu => vec![

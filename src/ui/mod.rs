@@ -240,7 +240,7 @@ pub enum Hit {
     SvcGroup(usize),
     /// service Properties panel (ui/svcprops.rs)
     SvcProp(usize),
-    /// status bar: "Update ready · … · restart" (elevated Blink)
+    /// status bar: "Update ready · … · restart" (elevated Hayate)
     Update,
     /// status bar: "… rolled back · click to try again" (manual update check)
     UpdateCheck,
@@ -288,7 +288,7 @@ pub enum Action {
     StartupMenu(f32, f32, Box<startup::MenuCtx>),
     EndSelected,
     Capture,
-    /// elevated relaunch of Blink (UAC prompt), then close this instance
+    /// elevated relaunch of Hayate (UAC prompt), then close this instance
     RestartAdmin,
     /// run the PawnIO installer through winget (UAC prompt)
     InstallPawnIO,
@@ -306,7 +306,7 @@ pub enum Action {
     InstallAll(crate::setup::logic::Choice),
     /// Settings: turn the Task Manager redirect on (true) or off (UAC, elevated helper)
     TaskMgr(bool),
-    /// Settings: replace the protected launcher copy with this Blink (UAC, elevated helper)
+    /// Settings: replace the protected launcher copy with this Hayate (UAC, elevated helper)
     TaskMgrRefresh,
     /// copy this text to the clipboard
     Clip(String),
@@ -1311,11 +1311,11 @@ impl App {
     }
 }
 
-/// Vitals, or (debug builds only) the 1-based tab in `BLINK_TAB`, so an
+/// Vitals, or (debug builds only) the 1-based tab in `HAYATE_TAB`, so an
 /// elevated test run, which cannot be clicked (UIPI), can open on any tab.
 fn start_tab() -> Tab {
     #[cfg(debug_assertions)]
-    if let Some(i) = std::env::var("BLINK_TAB").ok().and_then(|v| v.parse::<usize>().ok()).filter(|i| (1..=TABS.len()).contains(i)) {
+    if let Some(i) = crate::osutil::env_var("TAB").ok().and_then(|v| v.parse::<usize>().ok()).filter(|i| (1..=TABS.len()).contains(i)) {
         return TABS[i - 1].0;
     }
     Tab::Vitals

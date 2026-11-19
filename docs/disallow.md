@@ -1,13 +1,13 @@
 # Disallow running
 
-An opt-in saved rule: when a program matching the rule **has started**, Blink ends it. It is the Process Lasso "disallow" idea, built on Blink's existing rules engine.
+An opt-in saved rule: when a program matching the rule **has started**, Hayate ends it. It is the Process Lasso "disallow" idea, built on Hayate's existing rules engine.
 
 ## What it is not
 
-- **Not launch prevention.** Windows still starts the program. It can show a window or run for a moment (measured on the test machine: about 1 s with the 1 s snapshot path, faster when ETW is available) before Blink ends it.
-- **Not a security control.** It does not stop malware, does not survive Blink being closed, and a program that restarts itself faster than Blink ends it will win some rounds (see rate bound).
+- **Not launch prevention.** Windows still starts the program. It can show a window or run for a moment (measured on the rig: about 1 s with the 1 s snapshot path, faster when ETW is available) before Hayate ends it.
+- **Not a security control.** It does not stop malware, does not survive Hayate being closed, and a program that restarts itself faster than Hayate ends it will win some rounds (see rate bound).
 - **Unsaved work is lost.** `TerminateProcess` gives the program no chance to save. The panel says this first, before any other limit.
-- **No new system footprint.** No driver, service, scheduled task, IFEO key, firewall rule, elevation request or autostart. It only runs while Blink runs, with Blink's own rights (so an elevated program, or one in another user's session, needs Blink run as administrator; otherwise the Rules tab shows "access denied").
+- **No new system footprint.** No driver, service, scheduled task, IFEO key, firewall rule, elevation request or autostart. It only runs while Hayate runs, with Hayate's own rights (so an elevated program, or one in another user's session, needs Hayate run as administrator; otherwise the Rules tab shows "access denied").
 
 The UI says this in the confirmation panel before anything is enabled.
 
@@ -48,15 +48,15 @@ An enabled priority rule is therefore never switched off by "Save, keep OFF". **
 
 - Process menu (Processes and every Vitals Top list, shared builder): `Disallow running… (every name.exe)`. Disabled, with the reason, for protected programs, a process with no start time, no image path or no representative.
 - Panel: re-reads the process through a handle verified by PID + creation time, uses *its* image (not the row text), runs the protection checks, then offers scope (every copy of the name / only this file). It shows the other settings of an existing rule and what turning Disallow on does to them.
-- **The count is a label, not a promise.** It reads "N copies named like X were seen running in the last list refresh. After you confirm, Blink tries to end the ones it is allowed to…". Skipped or surviving: protected programs, ones needing administrator rights, other sessions' programs, ones covered by a more specific rule, and copies that start or exit meanwhile. The button says `Disallow, try to end N seen now`.
+- **The count is a label, not a promise.** It reads "N copies named like X were seen running in the last list refresh. After you confirm, Hayate tries to end the ones it is allowed to…". Skipped or surviving: protected programs, ones needing administrator rights, other sessions' programs, ones covered by a more specific rule, and copies that start or exit meanwhile. The button says `Disallow, try to end N seen now`.
 - Buttons: `Save, keep OFF` (ends nothing), `Disallow …` / `Turn the whole rule on + Disallow`, `Allow running again` (undo), `Retry saving`. The text area scrolls (mouse wheel) and the buttons wrap into rows pinned under it, so every limit and every button is reachable in a narrow or short window.
-- **Save status.** Success text appears only after the disk write is acknowledged (`SaveStatus`). A failed write says so and that the change lasts until Blink closes. A write the disk has not acknowledged within 8 s is reported as *not confirmed* (never as saved), waiting stops and the buttons become usable again, and `Retry saving` performs a **real write of the current rules** (also when the change is already on in memory). The Rules tab shows a red line while the last write failed.
+- **Save status.** Success text appears only after the disk write is acknowledged (`SaveStatus`). A failed write says so and that the change lasts until Hayate closes. A write the disk has not acknowledged within 8 s is reported as *not confirmed* (never as saved), waiting stops and the buttons become usable again, and `Retry saving` performs a **real write of the current rules** (also when the change is already on in memory). The Rules tab shows a red line while the last write failed.
 - If the worker thread that ends programs could not start or has stopped, the panel says "Disallow cannot run", the confirm button is off, and every Disallow rule shows `ON but NOT ENFORCED` plus a red line in Rules. Nothing claims to be active while nothing is ended.
 - Rules tab: red `Disallow running · ON · ends it after it starts` / `OFF · nothing is ended`; `Last result` shows the last attempt (ended, access denied, refused, paused). Toggling ON asks via the panel; toggling OFF is immediate. Right-click: `Allow running again (remove Disallow)`.
 
 ## Engine (src/rules/disallow.rs, protect.rs)
 
-All termination runs on a dedicated `blink-disallow` worker, never on the UI or ETW thread. The queue is finite (256 jobs). Triggers: a process start event (`Job::Start{pid, create}`), a rule being enabled (`Sweep(rule)`), Blink startup (`Sweep(all)`), and the recoveries below.
+All termination runs on a dedicated `hayate-disallow` worker, never on the UI or ETW thread. The queue is finite (256 jobs). Triggers: a process start event (`Job::Start{pid, create}`), a rule being enabled (`Sweep(rule)`), Hayate startup (`Sweep(all)`), and the recoveries below.
 
 Termination path (`enforce`), every step fail-closed:
 
@@ -79,7 +79,7 @@ Termination path (`enforce`), every step fail-closed:
 
 `protect::check` refuses, with a reason shown in Rules:
 
-- PID ≤ 4, Blink itself (PID and image), any program named `blink*` (helper, updater, parked or multi-instance copies);
+- PID ≤ 4, Hayate itself (PID and image), any program named `hayate*` (helper, updater, parked or multi-instance copies);
 - anything under the Windows folder and the Defender / Security directories. The Windows folder is **`GetWindowsDirectoryW`**, the others are known-folder (`SHGetKnownFolderPath`) paths; no environment variable is read (a process can change those);
 - an essential-name list (`csrss`, `lsass`, `svchost`, `explorer`, `dwm`, `winlogon`, `msmpeng`, …) wherever the file sits;
 - **`IsProcessCritical`** on the verified handle: critical or "cannot tell" → refused;
@@ -91,17 +91,17 @@ The static layer also rejects creating a rule whose pattern could never act (`pa
 
 ### Rate bound and log
 
-Per rule: more than 30 attempts in 10 s pauses that rule for 15 s (the pause is shown in Rules; survivors are swept afterwards, see Recovery). One log line per rule per **30 s** (counts are kept in the rule's stats); one line per 30 s for queue overflow. An auto-restarting app therefore cannot busy-loop Blink or flood `blink.log`.
+Per rule: more than 30 attempts in 10 s pauses that rule for 15 s (the pause is shown in Rules; survivors are swept afterwards, see Recovery). One log line per rule per **30 s** (counts are kept in the rule's stats); one line per 30 s for queue overflow. An auto-restarting app therefore cannot busy-loop Hayate or flood `hayate.log`.
 
 ## Known limits
 
-- Detection latency: up to ~1 s (snapshot path) or event-driven when ETW works. On the test machine ETW was unavailable ("session busy"), so the snapshot path is what was exercised.
-- While a rule is paused (15 s) or after a dropped start event, a copy that started keeps running until the recovery sweep (pause end + 0.5 s, or 3 s after the first dropped job), a rule edit or a Blink restart. A copy that survives the sweep because it was already given a final answer (protected, access denied) is not retried.
+- Detection latency: up to ~1 s (snapshot path) or event-driven when ETW works. On the rig ETW was unavailable ("session busy"), so the snapshot path is what was exercised.
+- While a rule is paused (15 s) or after a dropped start event, a copy that started keeps running until the recovery sweep (pause end + 0.5 s, or 3 s after the first dropped job), a rule edit or a Hayate restart. A copy that survives the sweep because it was already given a final answer (protected, access denied) is not retried.
 - The panel's count is what the last process-list refresh showed; it is not a promise about what will be ended.
-- Blink must be running; there is no pre-start gate.
-- A race exists between a process starting and Blink ending it; by design nothing is blocked before it starts.
-- Elevated / protected targets need Blink elevated and are still refused if critical or in the Windows folder.
-- A write that never completes (hung disk) is reported as not confirmed after 8 s; the change works in memory until Blink closes.
+- Hayate must be running; there is no pre-start gate.
+- A race exists between a process starting and Hayate ending it; by design nothing is blocked before it starts.
+- Elevated / protected targets need Hayate elevated and are still refused if critical or in the Windows folder.
+- A write that never completes (hung disk) is reported as not confirmed after 8 s; the change works in memory until Hayate closes.
 
 ## Tests
 
@@ -111,6 +111,6 @@ Per rule: more than 30 attempts in 10 s pauses that rule for 15 s (the pause is 
 - `ui::disallow`: the count text is a label not a promise; limits text names every limit and starts with unsaved work; an unacknowledged write times out; whole-rule confirmation logic; unenforced rules never shown ON.
 - `ui::procmenu`: scope text and fail-closed item.
 
-Test-machine proof (isolated slot, scratch `BLINK_MULTI` + `BLINK_DATA_DIR`, uniquely named fixture, foreground PID checked before each click).
+Rig proof (isolated slot, scratch `HAYATE_MULTI` + `HAYATE_DATA_DIR`, uniquely named fixture, foreground PID checked before each click) is recorded in the HANDOFF entry.
 
-Review corrections: Rules-opened confirmation preserves the pre-enable switch for Undo. Live refusal identities are never evicted due to cache capacity. Recovery uses a monotonic clock. Rules writes serialize off the UI thread and superseded queued writes cannot overwrite a newer acknowledged save. Access to other sessions depends on Windows token/ACL permissions; Blink requests no added privilege.
+Review corrections: Rules-opened confirmation preserves the pre-enable switch for Undo. Live refusal identities are never evicted due to cache capacity. Recovery uses a monotonic clock. Rules writes serialize off the UI thread and superseded queued writes cannot overwrite a newer acknowledged save. Access to other sessions depends on Windows token/ACL permissions; Hayate requests no added privilege.

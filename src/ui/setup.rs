@@ -1,6 +1,6 @@
 //! Install offer bar (portable copy), the install panel and Settings
 //! (install status, uninstall). Panels are drawn over the tab body inside
-//! Blink's own window: no dialogs, nothing modal, nothing before a click.
+//! Hayate's own window: no dialogs, nothing modal, nothing before a click.
 
 use super::*;
 use crate::setup::logic::{Choice, Where, INSTALL_ALL_HINT, INSTALL_ALL_LABEL, INSTALL_USER_LABEL, REPLACE_USER_SUB, REPLACE_USER_TITLE};
@@ -173,7 +173,7 @@ pub fn overlay(app: &mut App, g: &mut Gfx, body: Rect) {
         Panel::Install => {
             g.text("Install Hayate just for me", Rect::new(x, y, iw, 24.0), f(15.0).b(), TX1);
             y += 28.0;
-            g.text(&format!("Copies this blink.exe to {}", st.install_dir), Rect::new(x, y, iw, 18.0), f(12.0), TX2);
+            g.text(&format!("Copies this hayate.exe to {}", st.install_dir), Rect::new(x, y, iw, 18.0), f(12.0), TX2);
             y += 18.0;
             g.text("Only for your Windows account, no administrator needed. Remove it any time in Settings or in Windows' Installed apps.", Rect::new(x, y, iw, 18.0), f(11.5), TX3);
             y += 26.0;
@@ -185,8 +185,8 @@ pub fn overlay(app: &mut App, g: &mut Gfx, body: Rect) {
             option(app, g, x - 10.0, y, iw + 20.0, T_AUTO, "Start with Windows", "Hidden in the tray at sign-in, never elevated. \u{201c}Install for everyone\u{201d} starts it for every user (Start with Windows for everyone)", c.autostart, true);
             y += 46.0;
             match &st.update_source {
-                Some(src) => option(app, g, x - 10.0, y, iw + 20.0, T_UPDATE, &format!("Auto-update from {src}"), "This copy came from a publish folder: new builds there swap in by themselves", c.update, true),
-                None => option(app, g, x - 10.0, y, iw + 20.0, T_UPDATE, "Auto-update", "Off: this exe is not in a publish folder", false, false),
+                Some(src) => option(app, g, x - 10.0, y, iw + 20.0, T_UPDATE, &format!("Auto-update from {src}"), "This copy came from a publish.ps1 folder: new builds there swap in by themselves", c.update, true),
+                None => option(app, g, x - 10.0, y, iw + 20.0, T_UPDATE, "Auto-update", "Off: this exe is not in a publish.ps1 folder", false, false),
             }
             y += 54.0;
             if crate::setup::user_install_exists() {
@@ -195,7 +195,7 @@ pub fn overlay(app: &mut App, g: &mut Gfx, body: Rect) {
             }
             g.text("Writes", Rect::new(x, y, iw, 16.0), f(11.0).b(), TX3);
             y += 16.0;
-            g.text(&format!("{}\\blink.exe · Start-menu shortcuts{}", st.install_dir, if c.autostart { " · Startup shortcut" } else { "" }), Rect::new(x, y, iw, 16.0), f(11.0), TX3);
+            g.text(&format!("{}\\hayate.exe · Start-menu shortcuts{}", st.install_dir, if c.autostart { " · Startup shortcut" } else { "" }), Rect::new(x, y, iw, 16.0), f(11.0), TX3);
             y += 16.0;
             g.text(&format!("Installed-apps entry + toast click handler under HKCU{}",if c.update && st.update_source.is_some() { " · update.ini" } else { "" }), Rect::new(x, y, iw, 16.0), f(11.0), TX3);
             y += 24.0;
@@ -411,7 +411,7 @@ struct TmLayout {
     /// the status text and the recovery hint, wrapped to the block's width
     lines: Vec<String>,
     hint: Vec<String>,
-    /// "launcher is older than this Blink" + the Refresh button (wrapped text; empty: not offered)
+    /// "launcher is older than this Hayate" + the Refresh button (wrapped text; empty: not offered)
     refresh: Vec<String>,
     offer: crate::taskmgr::Offer,
     /// real height of the block (what the next block starts after)
@@ -436,7 +436,7 @@ fn tm_layout(g: &mut Gfx, w: f32) -> TmLayout {
     let line = if ok { crate::taskmgr::describe(&st) } else { "Off in a portable copy.".into() };
     let lines = super::cpu::wrap(g, &line, w, f(11.0), 8); // the longest status (PendingRemoval, ~5 lines at 300 px) must keep its actionable tail
     let hint = super::cpu::wrap(g, crate::taskmgr::logic::RECOVERY_HINT, w, f(9.5), 4);
-    // the launcher is an older build than this Blink: say so, once, with the way out (never a pop-up)
+    // the launcher is an older build than this Hayate: say so, once, with the way out (never a pop-up)
     let offer = if ok { crate::taskmgr::offer(&st) } else { crate::taskmgr::Offer::None };
     let refresh = if offer == crate::taskmgr::Offer::None { Vec::new() } else { super::cpu::wrap(g, crate::taskmgr::offer_text(offer), w, f(11.0), 5) };
     let btn_h = if crate::taskmgr::offer_button(offer).is_some() { 4.0 + TM_REFRESH_BTN_H } else { 0.0 };
@@ -631,7 +631,7 @@ pub fn click(app: &mut App, h: Hit) -> Action {
         },
         N_SAVE => crate::taskbar::save_snippet(),
         T_TM => {
-            // one UAC prompt, then Blink's elevated helper does it all (src/taskmgr)
+            // one UAC prompt, then Hayate's elevated helper does it all (src/taskmgr)
             use crate::taskmgr::logic::Status;
             if crate::taskmgr::allowed() && !crate::taskmgr::busy() {
                 match crate::taskmgr::ui_status() {
@@ -641,7 +641,7 @@ pub fn click(app: &mut App, h: Hit) -> Action {
             }
         }
         T_TM_REFRESH => {
-            // the same helper path as the switch: one UAC prompt (none when this Blink is elevated)
+            // the same helper path as the switch: one UAC prompt (none when this Hayate is elevated)
             if crate::taskmgr::allowed() && !crate::taskmgr::busy() && matches!(crate::taskmgr::offer(&crate::taskmgr::ui_status()), crate::taskmgr::Offer::Refresh | crate::taskmgr::Offer::Repair) {
                 return Action::TaskMgrRefresh;
             }

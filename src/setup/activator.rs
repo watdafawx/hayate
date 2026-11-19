@@ -1,13 +1,13 @@
 //! The toast activator: a COM local server for one class
-//! (`logic::CLSID`). Windows starts `blink.exe -ToastActivated` through the
+//! (`logic::CLSID`). Windows starts `hayate.exe -ToastActivated` through the
 //! HKCU `LocalServer32` key when a toast in the notification centre is
 //! clicked, then calls `INotificationActivationCallback::Activate` with the
 //! toast's `launch` string (`watch:<event id>`).
 //!
 //! Only a process started with `-ToastActivated` registers the class, for a
-//! few seconds, on its own MTA thread; the running Blink never does (an
-//! elevated Blink could not be reached by the shell anyway). main then
-//! forwards the event to the running Blink or starts Blink on Watch.
+//! few seconds, on its own MTA thread; the running Hayate never does (an
+//! elevated Hayate could not be reached by the shell anyway). main then
+//! forwards the event to the running Hayate or starts Hayate on Watch.
 
 use std::sync::mpsc::{channel, Sender};
 use std::time::Duration;

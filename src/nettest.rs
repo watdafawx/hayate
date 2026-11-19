@@ -230,7 +230,7 @@ pub fn start(ip: IpAddr, port: u16, table: &[(IpAddr, u16)]) -> Result<(), Rejec
         r.begin(key, now);
         Ok::<(), Reject>(())
     })?;
-    let spawned = std::thread::Builder::new().name("blink-net-test".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name("hayate-net-test".into()).spawn(move || {
         let outcome = run(ip, port);
         reg(|r| r.finish(key, outcome, Instant::now()));
         crate::ui::icons::poke();
@@ -385,7 +385,7 @@ mod tests {
         assert_eq!((b.len() as i32, n), (16, 16));
         assert_eq!(&b[0..2], &2u16.to_ne_bytes());
         assert_eq!(&b[2..4], &[0x63, 0xDD], "25565 in network order");
-        assert_eq!(&b[4..8], &[10, 0, 0, 3]);
+        assert_eq!(&b[4..8], &[192, 168, 50, 3]);
         let (b, n) = socket_addr(ip("2001:db8::1"), 443);
         assert_eq!((b.len() as i32, n), (28, 28));
         assert_eq!(&b[0..2], &23u16.to_ne_bytes());
@@ -397,7 +397,7 @@ mod tests {
     fn only_literal_ips_parse() {
         assert_eq!(parse_literal("10.0.0.3"), Some(ip("10.0.0.3")));
         assert_eq!(parse_literal("2001:db8::1"), Some(ip("2001:db8::1")));
-        for bad in ["", "localhost", "example.com", "10.0.0.3.nip.io", "10.0.0", "10.0.0.3:80", "[::1]", "fe80::1%12", "1.2.3.4 ", " 1.2.3.4", "1.2.3.4/24", "0x7f.1", "http://1.2.3.4", "1.2.3.4\n"] {
+        for bad in ["", "localhost", "example.com", "10.0.0.3.nip.io", "192.168.50", "10.0.0.3:80", "[::1]", "fe80::1%12", "1.2.3.4 ", " 1.2.3.4", "1.2.3.4/24", "0x7f.1", "http://1.2.3.4", "1.2.3.4\n"] {
             assert_eq!(parse_literal(bad), None, "{bad:?}");
         }
         assert_eq!(parse_literal(&"1".repeat(60)), None);

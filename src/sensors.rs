@@ -5,8 +5,8 @@
 //! so this module only handles what the sampler cannot: the CPU's on-die SMU
 //! thermal register, read through PawnIO's signed `AMDFamily17` module.
 //!
-//! PawnIO is loaded at runtime with LoadLibraryW/GetProcAddress so Blink starts
-//! and runs fine when the driver is absent. Blink never installs, starts or
+//! PawnIO is loaded at runtime with LoadLibraryW/GetProcAddress so Hayate starts
+//! and runs fine when the driver is absent. Hayate never installs, starts or
 //! otherwise touches the PawnIO service; if `PawnIOLib.dll` is missing or the
 //! service is not running, `cpu_temp` reports `CpuRead::NotInstalled` and the
 //! Vitals CPU detail shows "PawnIO not installed" while the GPU / storage panels keep
@@ -87,7 +87,7 @@ pub enum CpuRead {
     Ok(f32),
     /// PawnIOLib.dll is missing or the PawnIO service is not running.
     NotInstalled,
-    /// Installed, but Blink is not running elevated.
+    /// Installed, but Hayate is not running elevated.
     NeedsAdmin,
     /// The driver is there but the module load or SMN read failed (e.g. a
     /// non-AMD CPU, a torn read, or a transient driver error).

@@ -17,6 +17,9 @@ mod netscope;
 mod notify;
 mod osutil;
 mod power;
+#[cfg(test)]
+mod rename_guard;
+mod rename;
 mod rules;
 mod sample;
 mod sensors;
@@ -34,8 +37,8 @@ mod winplace;
 mod zoom;
 
 fn main() {
-    // started as blink-tm.exe (the Task Manager redirect's launcher): do that one job and exit,
-    // before anything else of Blink starts
+    // started as hayate-tm.exe (the Task Manager redirect's launcher): do that one job and exit,
+    // before anything else of Hayate starts
     if taskmgr::launcher() {
         return;
     }
@@ -46,21 +49,24 @@ fn main() {
     // an elevated uninstall / all-users install never takes its data dir from the caller
     {
         let a: Vec<String> = std::env::args().skip(1).collect();
-        if osutil::is_elevated() && (setup::logic::is_uninstall_launch(&a) || setup::logic::parse_install_machine(&a).is_some()) {
+        if osutil::is_elevated() && (setup::logic::is_uninstall_launch(&a) || setup::logic::parse_install_machine(&a).is_some() || a.iter().any(|x| x == "--startup-release")) {
             osutil::lock_data_dir_to_known_folder();
         }
     }
-    // before anything reads BLINK_DATA_DIR / BLINK_MULTI (UAC update relaunch)
+    // the one-time Blink -> Hayate migration: data dir, install dir, registry,
+    // shortcuts, redirect. It reads the data dir, so the argv-provided one has to be
+    // in the environment first.
     update::env_from_args();
+    rename::early();
     timing::mark("main");
-    // windows subsystem has no console: keep panics in %LOCALAPPDATA%\Blink\panic.log
+    // windows subsystem has no console: keep panics in %LOCALAPPDATA%\Hayate\panic.log
     std::panic::set_hook(Box::new(|info| {
         let bt = std::backtrace::Backtrace::force_capture();
         let msg = format!("{info}\n{bt}\n");
         let p = osutil::data_dir().join("panic.log");
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) { use std::io::Write; let _ = f.write_all(msg.as_bytes()); }
     }));
-    // `--startup-release` (install.ps1 -Uninstall): give back the Windows startup entries Blink switched off, no window; exit 1 = nothing may be removed
+    // `--startup-release` (install.ps1 -Uninstall): give back the Windows startup entries Hayate switched off, no window; exit 1 = nothing may be removed
     if startup::release_cli() {
         return;
     }
@@ -80,7 +86,7 @@ fn main() {
         return;
     }
     // Debug builds only: exercise the unelevated launcher headlessly
-    // (an elevated Blink window cannot be driven by test tools: UIPI).
+    // (an elevated Hayate window cannot be driven by test tools: UIPI).
     #[cfg(debug_assertions)]
     {
         let a: Vec<String> = std::env::args().collect();
@@ -91,8 +97,8 @@ fn main() {
         }
         if a.len() == 4 && a[1] == "--test-svc" {
             // debug test hook: only ever acts on a disposable fixture service, never a real one
-            if !a[2].to_lowercase().starts_with("blinkfixture") {
-                osutil::log(&format!("test-svc refused: {} is not a BlinkFixture service", a[2]));
+            if !a[2].to_lowercase().starts_with("hayatefixture") {
+                osutil::log(&format!("test-svc refused: {} is not a HayateFixture service", a[2]));
                 return;
             }
             // the fixture itself stands in for the list row: a complete baseline is read once, here, up front

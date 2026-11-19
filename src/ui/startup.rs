@@ -4,7 +4,7 @@
 //! * **Windows entries**: everything Windows starts at sign-in (Run keys, Startup
 //!   folders), with stable identity, scope, state and who manages it. Enable or
 //!   disable an ordinary entry the way Task Manager does, or take it over.
-//! * **Blink list**: the apps Blink itself starts (opt-in), with an editor, a
+//! * **Hayate list**: the apps Hayate itself starts (opt-in), with an editor, a
 //!   deterministic scheduler (delay, After, CPU idle gate), an explicit Run now,
 //!   and an import of a Launchpad config.
 //!
@@ -123,11 +123,11 @@ enum Field {
 enum Cell {
     /// Windows entries: Status (Enabled/Disabled)
     Status,
-    /// Blink list: State (On/Off)
+    /// Hayate list: State (On/Off)
     AppState,
-    /// Blink list: Delay (seconds)
+    /// Hayate list: Delay (seconds)
     Delay,
-    /// Blink list: After (which app it waits for)
+    /// Hayate list: After (which app it waits for)
     After,
 }
 
@@ -187,7 +187,7 @@ fn status_hint(t: &Toggle) -> String {
     }
 }
 
-/// Tooltip line for an editable cell of the Blink list.
+/// Tooltip line for an editable cell of the Hayate list.
 fn app_hint(c: Cell, a: &MApp) -> Option<String> {
     match c {
         Cell::AppState => Some(format!("Double-click to turn {}", if a.enabled { "off" } else { "on" })),
@@ -302,13 +302,13 @@ impl Default for StartupView {
     }
 }
 
-/// Debug builds only: `BLINK_STARTUP_FIXTURE=<file>` replaces the scan with synthetic rows
+/// Debug builds only: `HAYATE_STARTUP_FIXTURE=<file>` replaces the scan with synthetic rows
 /// (`name|on/off|user/all/all32/folder|command` per line) so README screenshots never show
 /// real entries.
 #[cfg(debug_assertions)]
 fn fixture() -> Option<scan::Scan> {
     use crate::startup::id::{EntryId, Kind, Scope, View};
-    let text = std::fs::read_to_string(std::env::var("BLINK_STARTUP_FIXTURE").ok()?).ok()?;
+    let text = std::fs::read_to_string(crate::osutil::env_var("STARTUP_FIXTURE").ok()?).ok()?;
     let mut entries = Vec::new();
     for l in text.lines() {
         let p: Vec<&str> = l.splitn(4, '|').collect();
@@ -330,7 +330,7 @@ fn fixture() -> Option<scan::Scan> {
             target: None,
             icon: String::new(),
             live: crate::startup::approved::Live { present: true, wrong_type: false, approved: Some(st), user_override: None },
-            is_blink: false,
+            is_hayate: false,
             sig: None,
         });
     }
@@ -807,8 +807,8 @@ fn manager_panel(app: &mut App, g: &mut Gfx, area: Rect, y: f32, cfg: &Config, s
     for (i, l) in wrap(g, &text, (r.r() - 12.0 - tx).max(60.0), f(11.5), 2).iter().enumerate() {
         g.text(l, Rect::new(tx, r.y + 7.0 + i as f32 * 16.0, r.r() - 12.0 - tx, 16.0), f(11.5), tint);
     }
-    // Start with Windows (Blink's own entry)
-    let own_entry = app.startup.scan.entries.iter().find(|e| e.is_blink && e.id.scope == Scope::User).cloned();
+    // Start with Windows (Hayate's own entry)
+    let own_entry = app.startup.scan.entries.iter().find(|e| e.is_hayate && e.id.scope == Scope::User).cloned();
     let (line, can_toggle, label) = match &own_entry {
         Some(e) => match e.state() {
             State::Enabled => ("Start with Windows: on. Hayate's own Startup entry is enabled.".to_string(), true, "Turn off"),
@@ -1113,9 +1113,9 @@ fn details(app: &mut App, g: &mut Gfx, r: Rect, scan: &Scan, cfg: &Config, runv:
                 }
                 None => {
                     let enabled = e.state() == State::Enabled;
-                    let can = matches!(toggle_of(&e, false), Toggle::Go(_)) && !e.is_blink_blocked();
+                    let can = matches!(toggle_of(&e, false), Toggle::Go(_)) && !e.is_hayate_blocked();
                     b.push((D_TOGGLE, if enabled { "Disable".into() } else { "Enable".into() }, can, false));
-                    b.push((D_MANAGE, "Manage in Hayate…".into(), !e.is_blink, false));
+                    b.push((D_MANAGE, "Manage in Hayate…".into(), !e.is_hayate, false));
                     if e.id.machine() && !elevated {
                         g.text("Changing an all-users entry needs administrator rights.", Rect::new(x, y - 2.0, iw, 16.0), f(11.5), WARN_TX);
                         b.push((D_ADMIN, "Restart as administrator".into(), true, false));
@@ -1188,12 +1188,12 @@ fn details(app: &mut App, g: &mut Gfx, r: Rect, scan: &Scan, cfg: &Config, runv:
     }
 }
 
-trait BlinkBlocked {
-    fn is_blink_blocked(&self) -> bool;
+trait HayateBlocked {
+    fn is_hayate_blocked(&self) -> bool;
 }
-impl BlinkBlocked for Entry {
-    /// Blink's own startup entry may be switched on or off like any other.
-    fn is_blink_blocked(&self) -> bool {
+impl HayateBlocked for Entry {
+    /// Hayate's own startup entry may be switched on or off like any other.
+    fn is_hayate_blocked(&self) -> bool {
         false
     }
 }
@@ -1970,7 +1970,7 @@ pub fn click(app: &mut App, h: Hit) -> Action {
                     let was = m.store.snapshot().cfg.manage;
                     m.store.update_sync(|c| c.manage = on)?;
                     if on {
-                        // the opt-in: Blink's own Start with Windows shortcut gets one private argument so a start that came
+                        // the opt-in: Hayate's own Start with Windows shortcut gets one private argument so a start that came
                         // from it can be told from a manual or update start. Unrelated arguments stay. If it cannot be saved,
                         // the switch goes back off.
                         if let Err(e) = crate::startup::own::set_flag(&m.loc, true) {
@@ -1994,7 +1994,7 @@ pub fn click(app: &mut App, h: Hit) -> Action {
         }
         AUTOSTART => {
             let Some(m) = mgr() else { return Action::Repaint };
-            let Some(e) = app.startup.scan.entries.iter().find(|e| e.is_blink && e.id.scope == Scope::User).cloned() else { return Action::Repaint };
+            let Some(e) = app.startup.scan.entries.iter().find(|e| e.is_hayate && e.id.scope == Scope::User).cloned() else { return Action::Repaint };
             let on = e.state() != State::Enabled;
             app.startup.job("startup: Start with Windows", move || {
                 adopt::set_enabled(&m.loc, &e, on, &m.store).map(|_| if on { "Saved: Hayate starts with Windows.".to_string() } else { "Saved: Hayate no longer starts with Windows (the list cannot run at sign-in).".to_string() })
@@ -2198,7 +2198,7 @@ pub fn right_click(app: &mut App, id: usize, x: f32, y: f32) -> Action {
             let Some(e) = app.startup.scan.entries.iter().find(|e| &e.id == eid) else { return Action::Repaint };
             let owned = cfg.owner_of(&e.id).is_some();
             let locate = locate_of(e);
-            let facts = WinFacts { toggle: toggle_of(e, owned), owned, is_blink: e.is_blink, needs_admin: e.id.machine() && !is_elevated() && !owned, locate: locate.is_some() };
+            let facts = WinFacts { toggle: toggle_of(e, owned), owned, is_hayate: e.is_hayate, needs_admin: e.id.machine() && !is_elevated() && !owned, locate: locate.is_some() };
             MenuCtx { sel: sel.clone(), name: e.display(), locate, entries: win_menu(&facts), after: None }
         }
         Sel::App(aid) => {
@@ -2248,7 +2248,7 @@ fn mi(id: usize, text: &str, enabled: bool) -> ME {
 struct WinFacts {
     toggle: Toggle,
     owned: bool,
-    is_blink: bool,
+    is_hayate: bool,
     needs_admin: bool,
     locate: bool,
 }
@@ -2266,7 +2266,7 @@ fn win_menu(f: &WinFacts) -> Vec<ME> {
     if f.owned {
         m.push(mi(D_OPENLIST, "Open in Hayate list", true));
     } else {
-        m.push(mi(D_MANAGE, "Manage in Hayate…", !f.is_blink));
+        m.push(mi(D_MANAGE, "Manage in Hayate…", !f.is_hayate));
     }
     if f.needs_admin {
         m.push(mi(D_ADMIN, "Restart as administrator", true));
@@ -2285,7 +2285,7 @@ struct AppFacts {
     locate: bool,
 }
 
-/// Items of the menu of a Blink list app (pure, unit-tested). Unmanage and Remove only arm the
+/// Items of the menu of a Hayate list app (pure, unit-tested). Unmanage and Remove only arm the
 /// button's own two-step confirm.
 fn app_menu(f: &AppFacts) -> Vec<ME> {
     let mut m = vec![mi(D_EDIT, "Edit…", true), mi(M_SETDELAY, "Set delay…", true), mi(D_RUN, "Run now", f.can_run), mi(D_APP_ON, if f.enabled { "Turn off" } else { "Turn on" }, true), ME::Sep];
@@ -2490,7 +2490,7 @@ mod tests {
     use crate::startup::id::View;
 
     fn entry(name: &str, scope: Scope, approved_bytes: Option<Vec<u8>>) -> Entry {
-        Entry { id: EntryId::new(Kind::Run, scope, View::Native, name), raw: format!(r"C:\x\{name}.exe"), command: format!(r"C:\x\{name}.exe"), target: None, icon: String::new(), live: Live::new(true, approved_bytes, None), is_blink: false, sig: None }
+        Entry { id: EntryId::new(Kind::Run, scope, View::Native, name), raw: format!(r"C:\x\{name}.exe"), command: format!(r"C:\x\{name}.exe"), target: None, icon: String::new(), live: Live::new(true, approved_bytes, None), is_hayate: false, sig: None }
     }
 
     fn panel(importing: bool, token: u64) -> ImportPanel {
@@ -2713,7 +2713,7 @@ mod tests {
     }
 
     fn facts(toggle: Toggle) -> WinFacts {
-        WinFacts { toggle, owned: false, is_blink: false, needs_admin: false, locate: true }
+        WinFacts { toggle, owned: false, is_hayate: false, needs_admin: false, locate: true }
     }
 
     #[test]
@@ -2723,7 +2723,7 @@ mod tests {
         assert!(t.contains(&("Manage in Hayate…".to_string(), true)));
         assert!(t.contains(&("Open file location".to_string(), true)) && t.contains(&("Copy command".to_string(), true)) && t.contains(&("Copy name".to_string(), true)));
         assert_eq!(texts(&win_menu(&facts(Toggle::Go(true))))[0].0, "Enable");
-        // managed: toggle greyed with the reason, "Open in Blink list" instead of Manage
+        // managed: toggle greyed with the reason, "Open in Hayate list" instead of Manage
         let m = texts(&win_menu(&WinFacts { owned: true, ..facts(toggle_for(State::Enabled, false, false, true, true)) }));
         assert_eq!(m[0], ("Enable / Disable".to_string(), false));
         assert!(m[1].0.contains("manages") && !m[1].1);
@@ -2731,8 +2731,8 @@ mod tests {
         // all-users, not admin: greyed with reason + the restart offer
         let m = texts(&win_menu(&WinFacts { needs_admin: true, ..facts(toggle_for(State::Enabled, true, false, false, false)) }));
         assert!(!m[0].1 && m[1].0.contains("administrator") && m.contains(&("Restart as administrator".to_string(), true)));
-        // Blink's own entry cannot be taken over; no path = no locate
-        let m = texts(&win_menu(&WinFacts { is_blink: true, locate: false, ..facts(Toggle::Go(false)) }));
+        // Hayate's own entry cannot be taken over; no path = no locate
+        let m = texts(&win_menu(&WinFacts { is_hayate: true, locate: false, ..facts(Toggle::Go(false)) }));
         assert!(m.contains(&("Manage in Hayate…".to_string(), false)) && m.contains(&("Open file location".to_string(), false)));
     }
 
