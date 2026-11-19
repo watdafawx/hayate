@@ -1,0 +1,17 @@
+[package]
+name = "svcfixture"
+version = "0.1.0"
+edition = "2021"
+description = "Disposable Windows service used to test Blink's Services tab on a throwaway machine. Does nothing."
+publish = false
+
+# not part of Blink's build: its own workspace
+[workspace]
+
+[dependencies.windows]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_Security", "Win32_System_Services", "Win32_System_Threading"]
+
+[profile.release]
+opt-level = "s"
+strip = true
